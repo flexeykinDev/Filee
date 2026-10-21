@@ -90,14 +90,153 @@ public class ClipEditorTests
             Assert.Equal(2, editor.Edit.Parts.Count);
             Assert.EndsWith("phone tall.mp4", editor.Edit.Parts[1].Source);
             Assert.Equal(before + ClipWindowTests.Length / 2, editor.Length, 6);
-            Assert.True(editor.HasMusic);
-            Assert.EndsWith("song.mp3", editor.Edit.Music!.Path);
+            Assert.True(editor.HasSounds);
+            Assert.EndsWith("song.mp3", Assert.Single(editor.Edit.Sounds).Path);
             Assert.Contains("1", editor.Message); // "Not a video or a sound: 1"
             Assert.True(editor.Files.All(f => f.IsUsed));
             // One undo takes them all off again.
             editor.Undo();
             Assert.Single(editor.Edit.Parts);
-            Assert.False(editor.HasMusic);
+            Assert.False(editor.HasSounds);
+        });
+    }
+
+    /// <summary>A real picture file next to the window's video.</summary>
+    private static string MakePicture(ClipWindowViewModel vm, string name, int width = 200, int height = 100)
+    {
+        var path = Path.Combine(Path.GetDirectoryName(vm.FilePaths[0])!, name);
+        using var image = new ImageMagick.MagickImage(ImageMagick.MagickColors.OrangeRed, (uint)width, (uint)height);
+        image.Write(path, ImageMagick.MagickFormat.Png);
+        return path;
+    }
+
+    [AvaloniaFact]
+    public void Sounds_go_in_a_row_on_tracks_and_are_moved_trimmed_and_removed()
+    {
+        ClipWindowTests.WithClipWindow("en", false, ["match.mp4", "one.mp3", "two.mp3", "three.mp3"], (window, vm, _, _) =>
+        {
+            vm.SetLength(120);
+            vm.OpenEditor();
+            var editor = vm.Editor!;
+            var files = ClipWindowTests.OtherFiles(vm);
+            editor.AddFilesAsync(files.Take(2).ToList(), toTimeline: true).GetAwaiter().GetResult();
+            Assert.Equal(2, editor.Edit.Sounds.Count);
+            Assert.Equal((0.0, 40.0), (editor.Edit.Sounds[0].Offset, editor.Edit.Sounds[1].Offset)); // one after the other on A2
+            Assert.Equal(2, editor.SoundTracks); // A2 and an empty A3 to drag to
+
+            // The third onto a track of its own, from its card's menu.
+            editor.AddFilesAsync([files[2]], toTimeline: false).GetAwaiter().GetResult();
+            var card = editor.Files.Single(f => f.Name == "three.mp3");
+            editor.Seek(5);
+            editor.MenuForMedia(card).Single(m => m.Header == "On a new sound track").Run!();
+            var third = editor.Edit.Sounds[2];
+            Assert.Equal((1, 5.0), (third.Track, third.Offset));
+            Assert.True(editor.HasSoundSelection);
+            Assert.Equal("A3", editor.SoundTrackText);
+
+            // Dragged on the timeline: along and down, then its start trimmed; one undo step per drag.
+            editor.MoveSound(0, 10, 2);
+            editor.MoveSound(0, 12, 2);
+            editor.EndDrag();
+            Assert.Equal((12.0, 2), (editor.Edit.Sounds[0].Offset, editor.Edit.Sounds[0].Track));
+            editor.TrimSound(0, 14, 2, 20);
+            editor.EndDrag();
+            Assert.Equal((14.0, 2.0, 20.0), (editor.Edit.Sounds[0].Offset, editor.Edit.Sounds[0].From, editor.Edit.Sounds[0].Play));
+            editor.Undo();
+            editor.Undo();
+            Assert.Equal((0.0, 0), (editor.Edit.Sounds[0].Offset, editor.Edit.Sounds[0].Track));
+
+            // Removed from the project: its sound goes with its card.
+            editor.RemoveMedia(editor.Files.Single(f => f.Name == "one.mp3"));
+            Assert.Equal(2, editor.Edit.Sounds.Count);
+            Assert.DoesNotContain(editor.Files, f => f.Name == "one.mp3");
+            editor.Select(new EditorItem(EditorItemKind.Sound, 0));
+            editor.Delete(closeUp: false);
+            Assert.Single(editor.Edit.Sounds);
+        });
+    }
+
+    [AvaloniaFact]
+    public void Pictures_texts_and_the_part_are_moved_sized_and_turned()
+    {
+        ClipWindowTests.WithClipWindow("en", false, ["match.mp4"], (window, vm, _, _) =>
+        {
+            vm.OpenEditor();
+            var editor = vm.Editor!;
+            var logo = MakePicture(vm, "logo.png");
+            editor.Seek(3);
+            editor.AddFilesAsync([logo], toTimeline: true).GetAwaiter().GetResult();
+            var image = Assert.Single(editor.Edit.Images);
+            Assert.Equal((3.0, ClipEditorViewModel.PictureSeconds), (image.Start, image.Length));
+            Assert.NotNull(editor.ImageOf(logo));
+            Assert.True(editor.Files.Single(f => f.IsPicture).IsUsed);
+            Assert.Single(editor.VisibleImages);
+
+            // The picture's frame in the preview: moved, sized and turned as one drag.
+            editor.Select(new EditorItem(EditorItemKind.Image, 0));
+            Assert.Equal(new EditorItem(EditorItemKind.Image, 0), editor.Framed);
+            editor.Transform(new EditorItem(EditorItemKind.Image, 0), 0.8, 0.2, 0.5, 30);
+            editor.Transform(new EditorItem(EditorItemKind.Image, 0), 0.85, 0.2, 0.5, 45);
+            editor.EndDrag();
+            image = editor.Edit.Images[0];
+            Assert.Equal((0.85, 0.2, 0.5, 45.0), (image.X, image.Y, image.Width, image.Rotation));
+            editor.ImageOpacity = 0.5;
+            editor.TurnRight();
+            Assert.Equal((0.5, 135.0), (editor.Edit.Images[0].Opacity, editor.Edit.Images[0].Rotation));
+            editor.Undo();
+            editor.Undo();
+            editor.Undo();
+            Assert.Equal(0, editor.Edit.Images[0].Rotation);
+
+            // A text: font, see-through and turn.
+            editor.AddText("Title");
+            editor.TextFont = editor.Fonts[0];
+            editor.TextOpacity = 0.4;
+            editor.TextRotation = -15;
+            var text = editor.Edit.Texts[0];
+            Assert.Equal((null, 0.4, -15.0), (text.Font, text.Opacity, text.Rotation));
+
+            // The part shown: framed when it alone is selected; smaller and turned.
+            editor.SelectPart(0, ClipSelect.Only);
+            Assert.Equal(new EditorItem(EditorItemKind.Part, 0), editor.Framed);
+            editor.Transform(new EditorItem(EditorItemKind.Part, 0), 0.3, 0.5, 0.6, 90);
+            var part = editor.Edit.Parts[0];
+            Assert.Equal((0.3, 0.6, 90.0), (part.FocusX, part.Zoom, part.Rotation));
+            Assert.True(editor.PartRotation == 90);
+
+            // Its menu: the turn and the reset are there and work.
+            var menu = editor.MenuFor(new EditorItem(EditorItemKind.Part, 0), 4);
+            menu.Single(m => m.Header == "Reset").Run!();
+            part = editor.Edit.Parts[0];
+            Assert.Equal((0.5, 1.0, 0.0), (part.FocusX, part.Zoom, part.Rotation));
+
+            // The picture's card leaves the project with its picture.
+            editor.RemoveMedia(editor.Files.Single(f => f.IsPicture));
+            Assert.Empty(editor.Edit.Images);
+        });
+    }
+
+    [AvaloniaFact]
+    public void Export_draws_the_texts_and_pictures_for_the_conversion()
+    {
+        ClipWindowTests.WithClipWindow("en", false, ["match.mp4"], (window, vm, _, exports) =>
+        {
+            vm.OpenEditor();
+            var editor = vm.Editor!;
+            editor.AddFilesAsync([MakePicture(vm, "logo.png")], toTimeline: true).GetAwaiter().GetResult();
+            editor.AddText("Caption");
+            editor.TextRotation = 20;
+            editor.SetAspect("9:16");
+            editor.ExportResolution = editor.ExportResolutions.First(r => r.Value == 720);
+            editor.Export();
+            var edit = Assert.Single(exports).Preset.Media.Clip!;
+            var text = Assert.Single(edit.Texts);
+            var image = Assert.Single(edit.Images);
+            Assert.True(File.Exists(text.Rendered));
+            Assert.True(File.Exists(image.Rendered));
+            using var drawn = new ImageMagick.MagickImage(text.Rendered!);
+            Assert.Equal((720u, 1280u), (drawn.Width, drawn.Height)); // the written frame
+            Assert.True(drawn.HasAlpha);
         });
     }
 

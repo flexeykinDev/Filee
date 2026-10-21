@@ -1989,7 +1989,7 @@ public class RenderTests
             var editor = vm.Editor!;
             var others = ClipWindowTests.OtherFiles(vm);
             editor.AddFilesAsync(others, toTimeline: true).GetAwaiter().GetResult();
-            ClipWindowTests.WaitFor(() => editor.Files.All(f => f.IsAudio || f.Thumbnail is not null) && editor.MusicLoudness.Count > 0);
+            ClipWindowTests.WaitFor(() => editor.Files.All(f => f.IsAudio ? editor.LoudnessOf(f.Path).Count > 0 : f.Thumbnail is not null));
             editor.Seek(8);
             editor.Split();
             editor.SelectPart(0, Filee.App.Controls.ClipSelect.Only);
@@ -2002,7 +2002,15 @@ public class RenderTests
             editor.TextContent = language == "ru" ? "ЭЙС 1 vs 4" : "ACE 1 vs 4";
             editor.SelectPart(1, Filee.App.Controls.ClipSelect.Only);
             editor.PartZoom = 1.4;
+            editor.PartRotation = -8;
+            var logo = Path.Combine(Path.GetDirectoryName(vm.FilePaths[0])!, "logo.png");
+            using (var picture = new ImageMagick.MagickImage(new ImageMagick.MagickColor("#E8505B"), 240, 120))
+                picture.Write(logo, ImageMagick.MagickFormat.Png);
+            editor.Seek(2);
+            editor.AddFilesAsync([logo], toTimeline: true).GetAwaiter().GetResult();
+            editor.Transform(new Filee.App.Controls.EditorItem(Filee.App.Controls.EditorItemKind.Image, 0), 0.75, 0.15, 0.35, 12);
             editor.Seek(4);
+            editor.Select(new Filee.App.Controls.EditorItem(Filee.App.Controls.EditorItemKind.Image, 0));
             ClipWindowTests.WaitFor(() => editor.Picture is not null && !editor.IsBusy);
             Pump();
             var theme = dark ? "dark" : "light";

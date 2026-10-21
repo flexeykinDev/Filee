@@ -1,16 +1,17 @@
-// The editor's timeline: the clip as it plays on four tracks under a ruler. T the texts (dragged along, their edges
-// set how long they stay), V1 the parts' pictures (clicked to select, dragged to another place, their edges dragged to
-// take more or less of their video; a button between two parts picks the transition; a gap a part left has a button
-// that closes it), A1 the parts' own sound (its loudness and a volume line to drag), A2 the music (dragged along, its own
-// volume line). The ruler and empty places put the playhead. The wheel scrolls, Alt + wheel zooms (also the slider in
-// the editor). Files dropped on it go in where they are dropped. Time runs left to right in every language.
+// The editor's timeline: the clip as it plays on tracks under a ruler. T the texts and I the pictures over the video
+// (dragged along, their edges set how long they show), V1 the parts' pictures (clicked to select, dragged to another
+// place, their edges dragged to take more or less of their video; a button between two parts picks the transition; a
+// gap a part left has a button that closes it), A1 the parts' own sound (its loudness and a volume line to drag), and
+// A2, A3, … the sounds from other files (dragged along or to another track, trimmed by their edges, their own volume
+// lines; the last track is empty to drag a sound to). The ruler and empty places put the playhead; a right click opens
+// what is under the pointer's menu. The wheel scrolls, Alt + wheel zooms (also the slider in the editor). Files dropped
+// on it go in where they are dropped. Time runs left to right in every language.
 
 using System.Globalization;
 using Avalonia;
 using Avalonia.Controls;
 using Avalonia.Input;
 using Avalonia.Media;
-using Avalonia.Media.Imaging;
 using Filee.App.Services;
 using Filee.Core.Presets;
 
@@ -46,6 +47,9 @@ public sealed class EditorTimeline : Control
     public static readonly StyledProperty<IBrush?> TextBrushProperty =
         AvaloniaProperty.Register<EditorTimeline, IBrush?>(nameof(TextBrush), new SolidColorBrush(Color.FromRgb(232, 80, 91)));
 
+    public static readonly StyledProperty<IBrush?> ImageBrushProperty =
+        AvaloniaProperty.Register<EditorTimeline, IBrush?>(nameof(ImageBrush), new SolidColorBrush(Color.FromRgb(76, 132, 230)));
+
     public IEditorTimelineHost? Host { get => GetValue(HostProperty); set => SetValue(HostProperty, value); }
     public double Zoom { get => GetValue(ZoomProperty); set => SetValue(ZoomProperty, value); }
     public IBrush? AccentBrush { get => GetValue(AccentBrushProperty); set => SetValue(AccentBrushProperty, value); }
@@ -55,8 +59,9 @@ public sealed class EditorTimeline : Control
     public IBrush? SoundBrush { get => GetValue(SoundBrushProperty); set => SetValue(SoundBrushProperty, value); }
     public IBrush? MusicBrush { get => GetValue(MusicBrushProperty); set => SetValue(MusicBrushProperty, value); }
     public IBrush? TextBrush { get => GetValue(TextBrushProperty); set => SetValue(TextBrushProperty, value); }
+    public IBrush? ImageBrush { get => GetValue(ImageBrushProperty); set => SetValue(ImageBrushProperty, value); }
 
-    // Layout: the tracks' names on the left, a ruler on top, then T, V1, A1, A2, and a scroll bar when zoomed in.
+    // Layout: the tracks' names on the left, a ruler on top, then T, I, V1, A1, A2…, and a scroll bar.
     internal const double LabelWidth = 30;
     internal const double RulerHeight = 20;
     internal const double TextHeight = 22;
@@ -76,9 +81,9 @@ public sealed class EditorTimeline : Control
 
     private const double MaxPixelsPerSecond = 600;
 
-    private enum Drag { None, Playhead, Edge, Volume, Music, MusicVolume, Pending, Move, Text, TextStart, TextEnd, Scroll }
+    private enum Drag { None, Playhead, Edge, Volume, Pending, Move, Item, ItemStart, ItemEnd, Sound, SoundStart, SoundEnd, SoundVolume, Scroll }
 
-    private enum Lane { None, Ruler, Text, Video, Sound, Music, Bar }
+    private enum Lane { None, Ruler, Text, Image, Video, Sound, Track, Bar }
 
     private static readonly Cursor IbeamCursor = new(StandardCursorType.Ibeam);
     private static readonly Cursor SizeNorthSouthCursor = new(StandardCursorType.SizeNorthSouth);
@@ -89,15 +94,19 @@ public sealed class EditorTimeline : Control
     private double _scroll;          // seconds at the left edge
     private Drag _drag;
     private Point _pressedAt;
-    private int _index = -1;         // the part, text or gap the drag is about
+    private Point _lastPoint;
+    private int _index = -1;         // the part, text, picture, sound or gap the drag is about
+    private EditorItemKind _itemKind;
     private bool _dragEnd;
-    private double _valueAtPress;    // an offset, a start or a length when the drag started
-    private double _lengthAtPress;
     private double _startAtPress;
+    private double _lengthAtPress;
+    private double _fromAtPress;
+    private int _trackAtPress;
     private ClipSelect _pendingMode;
     private Lane _pendingLane;
     private int _moveTo = -1;        // where a part being moved goes
     private double _dropAt = -1;     // where dropped files go (seconds), while they are dragged over
+    private int _tracks = 1;         // sound tracks laid out
     private IEditorTimelineHost? _hooked;
 
     static EditorTimeline()
@@ -124,13 +133,7 @@ public sealed class EditorTimeline : Control
     {
         base.OnPropertyChanged(change);
         if (change.Property == HostProperty)
-        {
-            if (_hooked is not null)
-                _hooked.TimelineChanged -= OnHostChanged;
-            _hooked = Host;
-            if (_hooked is not null)
-                _hooked.TimelineChanged += OnHostChanged;
-        }
+            Hook(Host);
         else if (change.Property == ZoomProperty && change.OldValue is double before && Host is { } host)
         {
             // Zoomed around the playhead: it stays where it is on screen.
@@ -140,51 +143,66 @@ public sealed class EditorTimeline : Control
         }
     }
 
-    protected override void OnDetachedFromVisualTree(VisualTreeAttachmentEventArgs e)
-    {
-        base.OnDetachedFromVisualTree(e);
-        if (_hooked is not null)
-            _hooked.TimelineChanged -= OnHostChanged;
-        _hooked = null;
-    }
-
     protected override void OnAttachedToVisualTree(VisualTreeAttachmentEventArgs e)
     {
         base.OnAttachedToVisualTree(e);
-        if (_hooked is null && Host is { } host)
-        {
-            _hooked = host;
+        Hook(Host);
+    }
+
+    protected override void OnDetachedFromVisualTree(VisualTreeAttachmentEventArgs e)
+    {
+        base.OnDetachedFromVisualTree(e);
+        Hook(null);
+    }
+
+    private void Hook(IEditorTimelineHost? host)
+    {
+        if (ReferenceEquals(_hooked, host))
+            return;
+        if (_hooked is not null)
+            _hooked.TimelineChanged -= OnHostChanged;
+        _hooked = host;
+        if (host is not null)
             host.TimelineChanged += OnHostChanged;
-        }
+        OnHostChanged();
     }
 
     private void OnHostChanged()
     {
+        if (Host is not { } host)
+            return;
+        if (host.SoundTracks != _tracks)
+        {
+            _tracks = host.SoundTracks;
+            InvalidateMeasure();
+        }
         // While it plays, the playhead is kept in view (a page on when it reaches the right edge).
-        if (_drag == Drag.None && Host is { } host && PixelsPerSecond() > 0)
+        if (_drag == Drag.None && PixelsPerSecond() > 0)
         {
             var x = XOf(host.Playhead);
             if (x > Content.Right - 4 || x < Content.X)
-            {
                 _scroll = host.Playhead - Content.Width / PixelsPerSecond() * 0.1;
-                ClampScroll();
-            }
         }
         ClampScroll();
         InvalidateVisual();
     }
 
     protected override Size MeasureOverride(Size availableSize) =>
-        new(0, RulerHeight + TextHeight + LaneGap + VideoHeight + LaneGap + SoundHeight + LaneGap + MusicHeight + LaneGap + BarHeight);
+        new(0, RulerHeight + 2 * (TextHeight + LaneGap) + VideoHeight + LaneGap + SoundHeight + LaneGap
+            + Math.Max(1, _tracks) * (MusicHeight + LaneGap) + BarHeight);
 
     // ───────────────────────── Geometry ─────────────────────────
 
     internal Rect Content => new(LabelWidth + 6, 0, Math.Max(1, Bounds.Width - LabelWidth - 12), Bounds.Height);
     internal Rect TextLane => new(Content.X, RulerHeight, Content.Width, TextHeight);
-    internal Rect VideoLane => new(Content.X, TextLane.Bottom + LaneGap, Content.Width, VideoHeight);
+    internal Rect ImageLane => new(Content.X, TextLane.Bottom + LaneGap, Content.Width, TextHeight);
+    internal Rect VideoLane => new(Content.X, ImageLane.Bottom + LaneGap, Content.Width, VideoHeight);
     internal Rect SoundLane => new(Content.X, VideoLane.Bottom + LaneGap, Content.Width, SoundHeight);
-    internal Rect MusicLane => new(Content.X, SoundLane.Bottom + LaneGap, Content.Width, MusicHeight);
-    private Rect BarLane => new(Content.X, MusicLane.Bottom + LaneGap, Content.Width, BarHeight);
+
+    /// <summary>Sound track <paramref name="track"/> (0 is A2).</summary>
+    internal Rect TrackLane(int track) => new(Content.X, SoundLane.Bottom + LaneGap + track * (MusicHeight + LaneGap), Content.Width, MusicHeight);
+
+    private Rect BarLane => new(Content.X, TrackLane(Math.Max(1, _tracks)).Y, Content.Width, BarHeight);
 
     /// <summary>How long the clip plays (at least a moment).</summary>
     private double Total => Math.Max(ClipRange.MinLength, Host?.Edit.Length ?? 0);
@@ -210,22 +228,30 @@ public sealed class EditorTimeline : Control
         _scroll = Math.Clamp(_scroll, 0, Math.Max(0, Total - visible));
     }
 
-    private Lane LaneAt(Point point)
+    private (Lane Lane, int Track) LaneAt(Point point)
     {
         if (point.X < Content.X - 4)
-            return Lane.None;
+            return (Lane.None, -1);
         if (point.Y < RulerHeight)
-            return Lane.Ruler;
+            return (Lane.Ruler, -1);
         if (point.Y < TextLane.Bottom + LaneGap / 2)
-            return Lane.Text;
+            return (Lane.Text, -1);
+        if (point.Y < ImageLane.Bottom + LaneGap / 2)
+            return (Lane.Image, -1);
         if (point.Y < VideoLane.Bottom + LaneGap / 2)
-            return Lane.Video;
+            return (Lane.Video, -1);
         if (point.Y < SoundLane.Bottom + LaneGap / 2)
-            return Lane.Sound;
-        if (point.Y < MusicLane.Bottom + LaneGap / 2)
-            return Lane.Music;
-        return Lane.Bar;
+            return (Lane.Sound, -1);
+        for (var track = 0; track < _tracks; track++)
+        {
+            if (point.Y < TrackLane(track).Bottom + LaneGap / 2)
+                return (Lane.Track, track);
+        }
+        return (Lane.Bar, -1);
     }
+
+    /// <summary>The sound track under <paramref name="y"/> (the nearest one above or below).</summary>
+    private int TrackAt(double y) => Math.Clamp((int)Math.Floor((y - TrackLane(0).Y) / (MusicHeight + LaneGap)), 0, Math.Max(0, _tracks - 1));
 
     /// <summary>The part playing at <paramref name="seconds"/> (the incoming one in a transition), or -1.</summary>
     private int PartAt(double seconds)
@@ -259,16 +285,11 @@ public sealed class EditorTimeline : Control
         return new Rect(x - TransitionSize / 2, VideoLane.Center.Y - TransitionSize / 2, TransitionSize, TransitionSize);
     }
 
-    private Rect TextRect(ClipText text) =>
-        new(XOf(text.Start), TextLane.Y + 1, Math.Max(6, text.Length * PixelsPerSecond()), TextLane.Height - 2);
+    private Rect ItemRect(double start, double length, Rect lane) =>
+        new(XOf(start), lane.Y + 1, Math.Max(6, length * PixelsPerSecond()), lane.Height - 2);
 
-    private Rect? MusicRect()
-    {
-        if (Host?.Edit.Music is not { } music)
-            return null;
-        var x0 = XOf(music.Offset);
-        return new Rect(x0, MusicLane.Y, Math.Max(2, music.PlayLength(Total) * PixelsPerSecond()), MusicLane.Height);
-    }
+    private Rect SoundRect(ClipMusic sound) =>
+        new(XOf(sound.Offset), TrackLane(sound.Track).Y, Math.Max(4, sound.PlayLength(Total) * PixelsPerSecond()), MusicHeight);
 
     // ───────────────────────── Drawing ─────────────────────────
 
@@ -279,7 +300,7 @@ public sealed class EditorTimeline : Control
         var edit = host.Edit;
         var accent = AccentBrush ?? Brushes.MediumPurple;
         DrawLabels(context);
-        foreach (var lane in new[] { TextLane, VideoLane, SoundLane, MusicLane })
+        foreach (var lane in new[] { TextLane, ImageLane, VideoLane, SoundLane }.Concat(Enumerable.Range(0, _tracks).Select(TrackLane)))
             context.DrawRectangle(TrackBrush ?? Brushes.LightGray, null, lane, Radius, Radius);
 
         using (context.PushClip(new Rect(Content.X - 2, 0, Content.Width + 4, Bounds.Height)))
@@ -290,13 +311,13 @@ public sealed class EditorTimeline : Control
             {
                 if (_drag == Drag.Move && i == _index)
                     continue;
-                DrawPart(context, edit, starts, i, accent, host.SelectedParts.Contains(i));
+                DrawPart(context, edit, i, accent, host.SelectedParts.Contains(i));
             }
             for (var i = 0; i < edit.Parts.Count - 1; i++)
-                DrawTransition(context, edit, i, accent, host.SelectedTransition == i);
-            DrawFades(context, edit, accent);
-            DrawTexts(context, edit, accent, host.SelectedText);
-            DrawMusic(context, host, accent);
+                DrawTransition(context, edit, i, accent, host.SelectedItem == new EditorItem(EditorItemKind.Transition, i));
+            DrawFades(context, edit);
+            DrawItems(context, host, accent);
+            DrawSounds(context, host, accent);
             if (_drag == Drag.Move && _index >= 0 && _index < edit.Parts.Count)
                 DrawMoving(context, edit, starts, accent);
             if (_dropAt >= 0)
@@ -317,9 +338,11 @@ public sealed class EditorTimeline : Control
                 context.DrawText(formatted, new Point(4, lane.Center.Y - formatted.Height / 2));
         }
         Label("T", TextLane);
+        Label("I", ImageLane);
         Label("V1", VideoLane);
         Label("A1", SoundLane);
-        Label("A2", MusicLane);
+        for (var track = 0; track < _tracks; track++)
+            Label($"A{track + 2}", TrackLane(track));
     }
 
     private void DrawRuler(DrawingContext context)
@@ -347,7 +370,7 @@ public sealed class EditorTimeline : Control
         }
     }
 
-    private void DrawPart(DrawingContext context, ClipEdit edit, double[] starts, int index, IBrush accent, bool selected)
+    private void DrawPart(DrawingContext context, ClipEdit edit, int index, IBrush accent, bool selected)
     {
         var part = edit.Parts[index];
         var video = PartRect(index, VideoLane);
@@ -361,7 +384,7 @@ public sealed class EditorTimeline : Control
         }
         DrawPictures(context, part, video);
         DrawSound(context, part, sound);
-        DrawBadges(context, part, video, index);
+        DrawBadges(context, part, video);
         var outline = new Pen(selected ? accent : new SolidColorBrush(Color.FromArgb(90, 0, 0, 0)), selected ? 2.5 : 1);
         context.DrawRectangle(null, outline, video.Deflate(selected ? 1.25 : 0.5), Radius, Radius);
         context.DrawRectangle(null, outline, sound.Deflate(selected ? 1.25 : 0.5), Radius, Radius);
@@ -380,13 +403,19 @@ public sealed class EditorTimeline : Control
             var seconds = (x + tile / 2 - rect.X) / pps;
             if (Host!.PictureAt(part.Source, part.SourceAt(seconds)) is not { } bitmap)
                 continue;
-            var target = new Rect(x, rect.Y, tile, rect.Height);
-            var size = bitmap.Size;
-            var scale = Math.Max(target.Width / size.Width, target.Height / size.Height);
-            var w = target.Width / scale;
-            var h = target.Height / scale;
-            context.DrawImage(bitmap, new Rect((size.Width - w) / 2, (size.Height - h) / 2, w, h), target);
+            DrawCover(context, bitmap, new Rect(x, rect.Y, tile, rect.Height));
         }
+    }
+
+    private static void DrawCover(DrawingContext context, Avalonia.Media.Imaging.Bitmap bitmap, Rect target)
+    {
+        var size = bitmap.Size;
+        if (size.Width <= 0 || size.Height <= 0)
+            return;
+        var scale = Math.Max(target.Width / size.Width, target.Height / size.Height);
+        var w = target.Width / scale;
+        var h = target.Height / scale;
+        context.DrawImage(bitmap, new Rect((size.Width - w) / 2, (size.Height - h) / 2, w, h), target);
     }
 
     /// <summary>The part's sound: its loudness (as loud as its volume makes it) and its volume line; hatched when muted.</summary>
@@ -398,41 +427,53 @@ public sealed class EditorTimeline : Control
             context.FillRectangle(brush, rect);
         if (part.Muted || part.IsStill)
         {
-            using (context.PushOpacity(0.3))
-            {
-                var hatch = new Pen(Foreground ?? Brushes.Black, 1);
-                for (var x = rect.Left - rect.Height; x < rect.Right; x += 8)
-                    context.DrawLine(hatch, new Point(x, rect.Bottom), new Point(x + rect.Height, rect.Top));
-            }
+            Hatch(context, rect, Foreground ?? Brushes.Black, 8, 0.3);
             return;
         }
-        var levels = Host!.LoudnessOf(part.Source);
-        var duration = Host.DurationOf(part.Source);
-        if (levels.Count > 0 && duration > 0)
+        DrawLoudness(context, Host!.LoudnessOf(part.Source), Host.DurationOf(part.Source), rect, part.PlayVolume, brush,
+            x => part.SourceAt((x - rect.X) / PixelsPerSecond()));
+        DrawVolumeLine(context, rect, part.Volume);
+    }
+
+    /// <summary>A waveform: the loudness at each moment (where <paramref name="sourceAt"/> says the moment is in its file).</summary>
+    private void DrawLoudness(DrawingContext context, IReadOnlyList<float> levels, double duration, Rect rect, double volume, IBrush brush, Func<double, double> sourceAt)
+    {
+        if (levels.Count == 0 || duration <= 0)
+            return;
+        var bars = new StreamGeometry();
+        using (var g = bars.Open())
         {
-            var bars = new StreamGeometry();
-            using (var g = bars.Open())
+            for (var x = Math.Max(rect.X, Content.X); x < Math.Min(rect.Right, Content.Right); x += 2)
             {
-                var pps = PixelsPerSecond();
-                var from = Math.Max(rect.X, Content.X);
-                var to = Math.Min(rect.Right, Content.Right);
-                for (var x = from; x < to; x += 2)
-                {
-                    var seconds = part.SourceAt((x + 1 - rect.X) / pps);
-                    var level = levels[Math.Clamp((int)(seconds / duration * levels.Count), 0, levels.Count - 1)];
-                    var height = Math.Min(rect.Height - 4, Math.Max(0.5, level * Math.Min(part.PlayVolume, 2) * (rect.Height - 4) / 2));
-                    g.BeginFigure(new Point(x, rect.Center.Y - height / 2), true);
-                    g.LineTo(new Point(x + 1.4, rect.Center.Y - height / 2));
-                    g.LineTo(new Point(x + 1.4, rect.Center.Y + height / 2));
-                    g.LineTo(new Point(x, rect.Center.Y + height / 2));
-                    g.EndFigure(true);
-                }
+                var seconds = sourceAt(x + 1);
+                var level = levels[Math.Clamp((int)(seconds / duration * levels.Count), 0, levels.Count - 1)];
+                var height = Math.Min(rect.Height - 4, Math.Max(0.5, level * Math.Min(volume, 2) * (rect.Height - 4) / 2));
+                g.BeginFigure(new Point(x, rect.Center.Y - height / 2), true);
+                g.LineTo(new Point(x + 1.4, rect.Center.Y - height / 2));
+                g.LineTo(new Point(x + 1.4, rect.Center.Y + height / 2));
+                g.LineTo(new Point(x, rect.Center.Y + height / 2));
+                g.EndFigure(true);
             }
-            context.DrawGeometry(brush, null, bars);
         }
-        var y = VolumeY(rect, part.Volume);
+        context.DrawGeometry(brush, null, bars);
+    }
+
+    private void DrawVolumeLine(DrawingContext context, Rect rect, double volume)
+    {
+        var y = VolumeY(rect, volume);
         context.DrawLine(new Pen(Brushes.White, 3), new Point(rect.Left, y), new Point(rect.Right, y));
         context.DrawLine(new Pen(Foreground ?? Brushes.Black, 1.2), new Point(rect.Left, y), new Point(rect.Right, y));
+    }
+
+    private static void Hatch(DrawingContext context, Rect rect, IBrush brush, double step, double opacity)
+    {
+        using (context.PushClip(rect))
+        using (context.PushOpacity(opacity))
+        {
+            var hatch = new Pen(brush, 1);
+            for (var x = rect.Left - rect.Height; x < rect.Right; x += step)
+                context.DrawLine(hatch, new Point(x, rect.Bottom), new Point(x + rect.Height, rect.Top));
+        }
     }
 
     private static double VolumeY(Rect rect, double volume) => rect.Bottom - 3 - Math.Clamp(volume, 0, 2) / 2 * (rect.Height - 6);
@@ -444,13 +485,7 @@ public sealed class EditorTimeline : Control
     {
         var rect = new Rect(video.X, video.Y, video.Width, sound.Bottom - video.Y);
         context.DrawRectangle(null, new Pen(accent, 1.5) { DashStyle = new DashStyle([4, 3], 0) }, rect.Deflate(1), Radius, Radius);
-        using (context.PushClip(rect))
-        using (context.PushOpacity(0.25))
-        {
-            var hatch = new Pen(accent, 1);
-            for (var x = rect.Left - rect.Height; x < rect.Right; x += 9)
-                context.DrawLine(hatch, new Point(x, rect.Bottom), new Point(x + rect.Height, rect.Top));
-        }
+        Hatch(context, rect, accent, 9, 0.25);
         if (GapButton(rect) is not { } chip)
             return;
         context.DrawRectangle(accent, null, chip, 999, 999);
@@ -468,8 +503,8 @@ public sealed class EditorTimeline : Control
         return new Rect(gap.Center.X - width / 2, gap.Center.Y - 10, width, 20);
     }
 
-    /// <summary>Its video's name, and what it does: speed, backwards, still, closer look, sound off.</summary>
-    private void DrawBadges(DrawingContext context, ClipPart part, Rect rect, int index)
+    /// <summary>Its video's name, and what it does: speed, backwards, still, size, turn, sound off.</summary>
+    private void DrawBadges(DrawingContext context, ClipPart part, Rect rect)
     {
         var notes = new List<string>();
         if (part.IsStill)
@@ -480,15 +515,17 @@ public sealed class EditorTimeline : Control
             notes.Add("×" + part.PlaySpeed.ToString("0.##", CultureInfo.CurrentCulture));
         if (part.Reverse)
             notes.Add("◀◀");
-        if (part.PlayZoom > 1.001)
+        if (Math.Abs(part.PlayZoom - 1) > 0.001)
             notes.Add("⤢ " + Math.Round(part.PlayZoom * 100).ToString(CultureInfo.CurrentCulture) + "%");
+        if (part.PlayRotation != 0)
+            notes.Add("↻ " + part.PlayRotation.ToString("0.#", CultureInfo.CurrentCulture) + "°");
         if (part.Muted)
             notes.Add("A1 ✕");
         var name = rect.Width > 90 && Host!.Edit.Parts.Select(p => p.Source).Distinct().Count() > 1
             ? Path.GetFileNameWithoutExtension(part.Source ?? "") is { Length: > 0 } file ? file : null
             : null;
         var line = string.Join("  ", (name is null ? notes : notes.Prepend(name)).Where(n => n.Length > 0));
-        if (line.Length == 0 && index >= 0)
+        if (line.Length == 0)
             return;
         var text = new FormattedText(line, CultureInfo.CurrentCulture, FlowDirection.LeftToRight, Typeface.Default, 10.5, Brushes.White);
         if (text.Width + 12 > rect.Width - 4)
@@ -506,9 +543,8 @@ public sealed class EditorTimeline : Control
         if (overlap > 0)
         {
             var start = edit.PartStarts()[index + 1];
-            var band = new Rect(XOf(start), VideoLane.Y, overlap * PixelsPerSecond(), VideoLane.Height);
             using (context.PushOpacity(0.35))
-                context.FillRectangle(accent, band);
+                context.FillRectangle(accent, new Rect(XOf(start), VideoLane.Y, overlap * PixelsPerSecond(), VideoLane.Height));
         }
         var button = TransitionButton(index);
         if (button.Right < Content.X || button.X > Content.Right)
@@ -529,114 +565,105 @@ public sealed class EditorTimeline : Control
         context.DrawText(text, new Point(button.Center.X - text.Width / 2, button.Center.Y - text.Height / 2));
     }
 
-    private void DrawFades(DrawingContext context, ClipEdit edit, IBrush accent)
+    private void DrawFades(DrawingContext context, ClipEdit edit)
     {
-        var height = VideoLane.Height;
         using (context.PushOpacity(0.55))
         {
             if (edit.FadeIn > 0)
-            {
-                var x0 = XOf(0);
-                var x1 = XOf(Math.Min(edit.FadeIn, Total));
-                var g = new StreamGeometry();
-                using (var c = g.Open())
-                {
-                    c.BeginFigure(new Point(x0, VideoLane.Y), true);
-                    c.LineTo(new Point(x1, VideoLane.Y));
-                    c.LineTo(new Point(x0, VideoLane.Y + height));
-                    c.EndFigure(true);
-                }
-                context.DrawGeometry(Brushes.Black, null, g);
-            }
+                Wedge(context, XOf(0), XOf(Math.Min(edit.FadeIn, Total)), rising: true);
             if (edit.FadeOut > 0)
-            {
-                var x0 = XOf(Math.Max(0, Total - edit.FadeOut));
-                var x1 = XOf(Total);
-                var g = new StreamGeometry();
-                using (var c = g.Open())
-                {
-                    c.BeginFigure(new Point(x0, VideoLane.Y), true);
-                    c.LineTo(new Point(x1, VideoLane.Y));
-                    c.LineTo(new Point(x1, VideoLane.Y + height));
-                    c.EndFigure(true);
-                }
-                context.DrawGeometry(Brushes.Black, null, g);
-            }
+                Wedge(context, XOf(Math.Max(0, Total - edit.FadeOut)), XOf(Total), rising: false);
         }
     }
 
-    private void DrawTexts(DrawingContext context, ClipEdit edit, IBrush accent, int selected)
+    private void Wedge(DrawingContext context, double x0, double x1, bool rising)
     {
-        var brush = TextBrush ?? accent;
+        var top = VideoLane.Y;
+        var bottom = VideoLane.Bottom;
+        var g = new StreamGeometry();
+        using (var c = g.Open())
+        {
+            c.BeginFigure(new Point(x0, top), true);
+            c.LineTo(new Point(x1, top));
+            c.LineTo(rising ? new Point(x0, bottom) : new Point(x1, bottom));
+            c.EndFigure(true);
+        }
+        context.DrawGeometry(Brushes.Black, null, g);
+    }
+
+    /// <summary>The texts on T and the pictures on I, as pills with their words or a small picture.</summary>
+    private void DrawItems(DrawingContext context, IEditorTimelineHost host, IBrush accent)
+    {
+        var edit = host.Edit;
+        var selected = host.SelectedItem;
         for (var i = 0; i < edit.Texts.Count; i++)
         {
             var text = edit.Texts[i];
-            var rect = TextRect(text);
-            if (rect.Right < Content.X || rect.X > Content.Right)
-                continue;
-            var on = i == selected;
-            using (context.PushOpacity(on ? 1 : 0.7))
-                context.DrawRectangle(brush, on ? new Pen(Brushes.White, 1.5) : null, rect, 5, 5);
-            var label = new FormattedText("T  " + text.Text.Replace('\n', ' '), CultureInfo.CurrentCulture, FlowDirection.LeftToRight,
-                new Typeface(Typeface.Default.FontFamily, FontStyle.Normal, FontWeight.SemiBold), 10.5, Brushes.White)
-            {
-                MaxTextWidth = Math.Max(1, rect.Width - 12),
-                MaxLineCount = 1,
-                Trimming = TextTrimming.CharacterEllipsis,
-            };
-            using (context.PushClip(rect))
-                context.DrawText(label, new Point(rect.X + 6, rect.Center.Y - label.Height / 2));
+            DrawPill(context, ItemRect(text.Start, text.Length, TextLane), TextBrush ?? accent, "T  " + text.Text.Replace('\n', ' '), null,
+                selected == new EditorItem(EditorItemKind.Text, i));
+        }
+        for (var i = 0; i < edit.Images.Count; i++)
+        {
+            var image = edit.Images[i];
+            DrawPill(context, ItemRect(image.Start, image.Length, ImageLane), ImageBrush ?? accent, Path.GetFileName(image.Path), host.ImageOf(image.Path),
+                selected == new EditorItem(EditorItemKind.Image, i));
         }
     }
 
-    private void DrawMusic(DrawingContext context, IEditorTimelineHost host, IBrush accent)
+    private void DrawPill(DrawingContext context, Rect rect, IBrush brush, string label, Avalonia.Media.Imaging.Bitmap? picture, bool selected)
     {
-        var lane = MusicLane;
-        if (MusicRect() is not { } rect || host.Edit.Music is not { } music)
-        {
-            if (host.NoMusicText is { Length: > 0 } hint)
-            {
-                var text = new FormattedText(hint, CultureInfo.CurrentCulture, FlowDirection.LeftToRight, Typeface.Default, 10.5, Foreground ?? Brushes.Gray);
-                using (context.PushOpacity(0.45))
-                    context.DrawText(text, new Point(Content.X + 8, lane.Center.Y - text.Height / 2));
-            }
+        if (rect.Right < Content.X || rect.X > Content.Right)
             return;
-        }
-        var brush = MusicBrush ?? Brushes.Orange;
-        var selected = host.IsMusicSelected;
-        using (context.PushClip(new RoundedRect(rect, Radius)))
+        using (context.PushOpacity(selected ? 1 : 0.7))
+            context.DrawRectangle(brush, selected ? new Pen(Brushes.White, 1.5) : null, rect, 5, 5);
+        var x = rect.X + 6;
+        using var clip = context.PushClip(rect);
+        if (picture is not null && rect.Width > 30)
         {
-            using (context.PushOpacity(0.3))
-                context.FillRectangle(brush, rect);
-            var levels = host.MusicLoudness;
-            if (levels.Count > 0 && music.Length > 0)
-            {
-                var g = new StreamGeometry();
-                using (var c = g.Open())
-                {
-                    var pps = PixelsPerSecond();
-                    for (var x = Math.Max(rect.X, Content.X); x < Math.Min(rect.Right, Content.Right); x += 2)
-                    {
-                        var seconds = music.From + (x - rect.X) / pps;
-                        var level = levels[Math.Clamp((int)(seconds / music.Length * levels.Count), 0, levels.Count - 1)];
-                        var height = Math.Min(rect.Height - 4, Math.Max(0.5, level * music.PlayVolume * (rect.Height - 4) / 2));
-                        c.BeginFigure(new Point(x, rect.Center.Y - height / 2), true);
-                        c.LineTo(new Point(x + 1.4, rect.Center.Y - height / 2));
-                        c.LineTo(new Point(x + 1.4, rect.Center.Y + height / 2));
-                        c.LineTo(new Point(x, rect.Center.Y + height / 2));
-                        c.EndFigure(true);
-                    }
-                }
-                context.DrawGeometry(brush, null, g);
-            }
-            var name = new FormattedText(Path.GetFileName(music.Path), CultureInfo.CurrentCulture, FlowDirection.LeftToRight, Typeface.Default, 10,
-                Foreground ?? Brushes.Black);
-            context.DrawText(name, new Point(rect.X + 6, rect.Y + 1));
-            var y = VolumeY(rect, music.Volume);
-            context.DrawLine(new Pen(Brushes.White, 3), new Point(rect.Left, y), new Point(rect.Right, y));
-            context.DrawLine(new Pen(Foreground ?? Brushes.Black, 1.2), new Point(rect.Left, y), new Point(rect.Right, y));
+            DrawCover(context, picture, new Rect(rect.X + 3, rect.Y + 3, rect.Height - 6, rect.Height - 6));
+            x = rect.X + rect.Height;
         }
-        context.DrawRectangle(null, new Pen(selected ? accent : brush, selected ? 2.5 : 1), rect.Deflate(selected ? 1.25 : 0.5), Radius, Radius);
+        var text = new FormattedText(label, CultureInfo.CurrentCulture, FlowDirection.LeftToRight,
+            new Typeface(Typeface.Default.FontFamily, FontStyle.Normal, FontWeight.SemiBold), 10.5, Brushes.White)
+        {
+            MaxTextWidth = Math.Max(1, rect.Right - x - 6),
+            MaxLineCount = 1,
+            Trimming = TextTrimming.CharacterEllipsis,
+        };
+        context.DrawText(text, new Point(x, rect.Center.Y - text.Height / 2));
+    }
+
+    /// <summary>The sounds on A2, A3, …: their loudness, name and volume line; the empty last track says what it is for.</summary>
+    private void DrawSounds(DrawingContext context, IEditorTimelineHost host, IBrush accent)
+    {
+        var edit = host.Edit;
+        var brush = MusicBrush ?? Brushes.Orange;
+        if (edit.Sounds.Count == 0 && host.NoSoundText is { Length: > 0 } hint)
+        {
+            var text = new FormattedText(hint, CultureInfo.CurrentCulture, FlowDirection.LeftToRight, Typeface.Default, 10.5, Foreground ?? Brushes.Gray);
+            using (context.PushOpacity(0.45))
+                context.DrawText(text, new Point(Content.X + 8, TrackLane(0).Center.Y - text.Height / 2));
+        }
+        for (var i = 0; i < edit.Sounds.Count; i++)
+        {
+            var sound = edit.Sounds[i];
+            var rect = SoundRect(sound);
+            if (rect.Right < Content.X || rect.X > Content.Right || sound.Track >= _tracks)
+                continue;
+            var selected = host.SelectedItem == new EditorItem(EditorItemKind.Sound, i);
+            using (context.PushClip(new RoundedRect(rect, Radius)))
+            {
+                using (context.PushOpacity(0.3))
+                    context.FillRectangle(brush, rect);
+                var pps = PixelsPerSecond();
+                DrawLoudness(context, host.LoudnessOf(sound.Path), sound.Length, rect, sound.PlayVolume, brush, x => sound.From + (x - rect.X) / pps);
+                var name = new FormattedText(Path.GetFileName(sound.Path), CultureInfo.CurrentCulture, FlowDirection.LeftToRight, Typeface.Default, 10,
+                    Foreground ?? Brushes.Black);
+                context.DrawText(name, new Point(rect.X + 6, rect.Y + 1));
+                DrawVolumeLine(context, rect, sound.Volume);
+            }
+            context.DrawRectangle(null, new Pen(selected ? accent : brush, selected ? 2.5 : 1), rect.Deflate(selected ? 1.25 : 0.5), Radius, Radius);
+        }
     }
 
     /// <summary>The part being moved, under the pointer, and where it would go.</summary>
@@ -647,15 +674,10 @@ public sealed class EditorTimeline : Control
         using (context.PushOpacity(0.7))
             DrawPictures(context, edit.Parts[_index], moved);
         context.DrawRectangle(null, new Pen(accent, 2.5), moved.Deflate(1.25), Radius, Radius);
-        if (_moveTo >= 0)
-        {
-            var at = _moveTo >= edit.Parts.Count ? Total : starts[_moveTo];
-            if (_moveTo > _index && _moveTo < edit.Parts.Count)
-                at = starts[_moveTo] + edit.Parts[_moveTo].Length;
-            else if (_moveTo >= edit.Parts.Count - 1 && _moveTo > _index)
-                at = Total;
-            DrawInsertMarker(context, XOf(at), accent);
-        }
+        if (_moveTo < 0)
+            return;
+        var at = _moveTo > _index ? starts[_moveTo] + edit.Parts[_moveTo].Length : starts[_moveTo];
+        DrawInsertMarker(context, XOf(at), accent);
     }
 
     private void DrawInsertMarker(DrawingContext context, double x, IBrush accent)
@@ -670,8 +692,9 @@ public sealed class EditorTimeline : Control
         if (x < Content.X - 1 || x > Content.Right + 1)
             return;
         var accent = AccentBrush ?? Brushes.MediumPurple;
-        context.DrawLine(new Pen(Brushes.White, 3), new Point(x, RulerHeight - 6), new Point(x, MusicLane.Bottom));
-        context.DrawLine(new Pen(accent, 1.6), new Point(x, RulerHeight - 6), new Point(x, MusicLane.Bottom));
+        var bottom = TrackLane(_tracks - 1).Bottom;
+        context.DrawLine(new Pen(Brushes.White, 3), new Point(x, RulerHeight - 6), new Point(x, bottom));
+        context.DrawLine(new Pen(accent, 1.6), new Point(x, RulerHeight - 6), new Point(x, bottom));
         var head = new StreamGeometry();
         using (var g = head.Open())
         {
@@ -695,19 +718,129 @@ public sealed class EditorTimeline : Control
             context.DrawRectangle(Foreground ?? Brushes.Gray, null, thumb, 4, 4);
     }
 
-    // ───────────────────────── Pointer ─────────────────────────
+    // ───────────────────────── Hit testing ─────────────────────────
 
-    private Point _lastPoint;
+    /// <summary>The text or picture pill under <paramref name="point"/> on T or I, and which edge (if any) is near.</summary>
+    private (EditorItem Item, Rect Rect)? PillAt(Point point, Lane lane)
+    {
+        if (Host is not { } host)
+            return null;
+        var edit = host.Edit;
+        if (lane == Lane.Text)
+        {
+            for (var i = edit.Texts.Count - 1; i >= 0; i--)
+            {
+                var rect = ItemRect(edit.Texts[i].Start, edit.Texts[i].Length, TextLane);
+                if (rect.Inflate(new Thickness(2, 0)).Contains(point))
+                    return (new EditorItem(EditorItemKind.Text, i), rect);
+            }
+        }
+        else if (lane == Lane.Image)
+        {
+            for (var i = edit.Images.Count - 1; i >= 0; i--)
+            {
+                var rect = ItemRect(edit.Images[i].Start, edit.Images[i].Length, ImageLane);
+                if (rect.Inflate(new Thickness(2, 0)).Contains(point))
+                    return (new EditorItem(EditorItemKind.Image, i), rect);
+            }
+        }
+        return null;
+    }
+
+    private int SoundAt(Point point)
+    {
+        if (Host is not { } host)
+            return -1;
+        var sounds = host.Edit.Sounds;
+        for (var i = sounds.Count - 1; i >= 0; i--)
+        {
+            if (sounds[i].Track < _tracks && SoundRect(sounds[i]).Contains(point))
+                return i;
+        }
+        return -1;
+    }
+
+    /// <summary>The part edge under the pointer on V1 or A1: the part and whether it is its end.</summary>
+    private (int Index, bool End)? EdgeAt(Point point)
+    {
+        if (Host is not { } host)
+            return null;
+        var edit = host.Edit;
+        var starts = edit.PartStarts();
+        (int, bool)? best = null;
+        var nearest = EdgeGrab;
+        for (var i = 0; i < edit.Parts.Count; i++)
+        {
+            var x0 = XOf(starts[i]);
+            var x1 = XOf(starts[i] + edit.Parts[i].Length);
+            if (x1 - x0 < 3 * EdgeGrab)
+                continue; // too narrow to tell an edge from the part
+            if (Math.Abs(point.X - x1) < nearest)
+            {
+                nearest = Math.Abs(point.X - x1);
+                best = (i, true);
+            }
+            if (Math.Abs(point.X - x0) < nearest)
+            {
+                nearest = Math.Abs(point.X - x0);
+                best = (i, false);
+            }
+        }
+        return best;
+    }
+
+    /// <summary>What a right click on <paramref name="point"/> is about.</summary>
+    private EditorItem? ItemAt(Point point)
+    {
+        var (lane, _) = LaneAt(point);
+        switch (lane)
+        {
+            case Lane.Text or Lane.Image when PillAt(point, lane) is { } pill:
+                return pill.Item;
+            case Lane.Video or Lane.Sound:
+                for (var i = 0; i < (Host?.Edit.Parts.Count ?? 0) - 1; i++)
+                {
+                    if (lane == Lane.Video && TransitionButton(i).Inflate(3).Contains(point))
+                        return new EditorItem(EditorItemKind.Transition, i);
+                }
+                return PartAt(TimeAt(point.X)) is >= 0 and var part ? new EditorItem(EditorItemKind.Part, part) : null;
+            case Lane.Track when SoundAt(point) is >= 0 and var sound:
+                return new EditorItem(EditorItemKind.Sound, sound);
+            default:
+                return null;
+        }
+    }
+
+    // ───────────────────────── Pointer ─────────────────────────
 
     protected override void OnPointerPressed(PointerPressedEventArgs e)
     {
         base.OnPointerPressed(e);
-        if (Host is not { } host || !e.GetCurrentPoint(this).Properties.IsLeftButtonPressed)
+        if (Host is not { } host)
             return;
         var point = e.GetPosition(this);
+        var properties = e.GetCurrentPoint(this).Properties;
+        if (properties.IsRightButtonPressed)
+        {
+            var item = ItemAt(point);
+            if (item is { Kind: EditorItemKind.Part } part)
+            {
+                if (!host.SelectedParts.Contains(part.Index))
+                    host.SelectPart(part.Index, ClipSelect.Only);
+            }
+            else if (item is { } other)
+                host.Select(other);
+            var items = host.MenuFor(item, TimeAt(point.X));
+            if (items.Count > 0)
+                EditorMenus.Build(items).Open(this);
+            e.Handled = true;
+            return;
+        }
+        if (!properties.IsLeftButtonPressed)
+            return;
         _pressedAt = _lastPoint = point;
         var edit = host.Edit;
-        var lane = LaneAt(point);
+        var (lane, _) = LaneAt(point);
         var mods = e.KeyModifiers;
         _pendingMode = mods.HasFlag(KeyModifiers.Shift) ? ClipSelect.Range
             : mods.HasFlag(KeyModifiers.Control) || mods.HasFlag(KeyModifiers.Meta) ? ClipSelect.Toggle
@@ -725,24 +858,19 @@ public sealed class EditorTimeline : Control
                 return;
             case Lane.Bar when IsZoomed:
                 _drag = Drag.Scroll;
-                _valueAtPress = _scroll;
+                _startAtPress = _scroll;
                 return;
-            case Lane.Text:
-                for (var i = edit.Texts.Count - 1; i >= 0; i--)
-                {
-                    var pill = TextRect(edit.Texts[i]);
-                    if (!pill.Inflate(new Thickness(2, 0)).Contains(point))
-                        continue;
-                    _index = i;
-                    _startAtPress = edit.Texts[i].Start;
-                    _lengthAtPress = edit.Texts[i].Length;
-                    _drag = Math.Abs(point.X - pill.Right) <= EdgeGrab ? Drag.TextEnd
-                        : Math.Abs(point.X - pill.X) <= EdgeGrab ? Drag.TextStart
-                        : Drag.Text;
-                    host.SelectText(i);
-                    return;
-                }
-                break;
+            case Lane.Text or Lane.Image when PillAt(point, lane) is { } pill:
+                _index = pill.Item.Index;
+                _itemKind = pill.Item.Kind;
+                (_startAtPress, _lengthAtPress) = pill.Item.Kind == EditorItemKind.Text
+                    ? (edit.Texts[_index].Start, edit.Texts[_index].Length)
+                    : (edit.Images[_index].Start, edit.Images[_index].Length);
+                _drag = Math.Abs(point.X - pill.Rect.Right) <= EdgeGrab ? Drag.ItemEnd
+                    : Math.Abs(point.X - pill.Rect.X) <= EdgeGrab ? Drag.ItemStart
+                    : Drag.Item;
+                host.Select(pill.Item);
+                return;
             case Lane.Video or Lane.Sound:
                 if (lane == Lane.Video)
                 {
@@ -751,7 +879,7 @@ public sealed class EditorTimeline : Control
                         if (TransitionButton(i).Inflate(3).Contains(point))
                         {
                             _drag = Drag.None;
-                            host.SelectTransition(i);
+                            host.Select(new EditorItem(EditorItemKind.Transition, i));
                             return;
                         }
                     }
@@ -790,54 +918,24 @@ public sealed class EditorTimeline : Control
                 _drag = Drag.Pending;
                 _index = index;
                 return;
-            case Lane.Music:
-                if (MusicRect() is { } music && music.Contains(point) && edit.Music is { } song)
-                {
-                    _index = 0;
-                    if (Math.Abs(point.Y - VolumeY(music, song.Volume)) <= 5)
-                    {
-                        _drag = Drag.MusicVolume;
-                        return;
-                    }
-                    _drag = Drag.Pending;
-                    _valueAtPress = song.Offset;
-                    return;
-                }
-                break;
+            case Lane.Track when SoundAt(point) is >= 0 and var at:
+            {
+                var sound = edit.Sounds[at];
+                var rect2 = SoundRect(sound);
+                _index = at;
+                (_startAtPress, _fromAtPress, _lengthAtPress, _trackAtPress) = (sound.Offset, sound.From, sound.PlayLength(Total), sound.Track);
+                host.Select(new EditorItem(EditorItemKind.Sound, at));
+                _drag = Math.Abs(point.Y - VolumeY(rect2, sound.Volume)) <= 5 ? Drag.SoundVolume
+                    : Math.Abs(point.X - rect2.Right) <= EdgeGrab ? Drag.SoundEnd
+                    : Math.Abs(point.X - rect2.X) <= EdgeGrab ? Drag.SoundStart
+                    : Drag.Sound;
+                return;
+            }
         }
         // An empty place: nothing selected, the playhead there.
         _drag = Drag.Playhead;
         host.ClearSelection();
         host.Seek(TimeAt(point.X));
-    }
-
-    /// <summary>The part edge under the pointer on V1 or A1: the part and whether it is its end.</summary>
-    private (int Index, bool End)? EdgeAt(Point point)
-    {
-        if (Host is not { } host)
-            return null;
-        var edit = host.Edit;
-        var starts = edit.PartStarts();
-        (int, bool)? best = null;
-        var nearest = EdgeGrab;
-        for (var i = 0; i < edit.Parts.Count; i++)
-        {
-            var x0 = XOf(starts[i]);
-            var x1 = XOf(starts[i] + edit.Parts[i].Length);
-            if (x1 - x0 < 3 * EdgeGrab)
-                continue; // too narrow to tell an edge from the part
-            if (Math.Abs(point.X - x1) < nearest)
-            {
-                nearest = Math.Abs(point.X - x1);
-                best = (i, true);
-            }
-            if (Math.Abs(point.X - x0) < nearest && i > 0 || i == 0 && Math.Abs(point.X - x0) < nearest)
-            {
-                nearest = Math.Abs(point.X - x0);
-                best = (i, false);
-            }
-        }
-        return best;
     }
 
     protected override void OnPointerMoved(PointerEventArgs e)
@@ -854,54 +952,58 @@ public sealed class EditorTimeline : Control
         }
         var edit = host.Edit;
         var pps = PixelsPerSecond();
+        var shift = (point.X - _pressedAt.X) / pps;
         switch (_drag)
         {
             case Drag.Playhead:
-                host.Seek(Snap(TimeAt(point.X), host, exceptText: -1));
+                host.Seek(Snap(TimeAt(point.X), host, null));
                 break;
             case Drag.Scroll:
-                _scroll = _valueAtPress + (point.X - _pressedAt.X) / BarLane.Width * Total;
+                _scroll = _startAtPress + (point.X - _pressedAt.X) / BarLane.Width * Total;
                 ClampScroll();
                 InvalidateVisual();
                 break;
             case Drag.Edge:
                 // The start edge: dragged right, the part takes less from its start (it keeps its place).
-                host.DragEdge(_index, _dragEnd, _dragEnd
-                    ? TimeAt(point.X) - _startAtPress
-                    : _lengthAtPress - (point.X - _pressedAt.X) / pps);
+                host.DragEdge(_index, _dragEnd, _dragEnd ? TimeAt(point.X) - _startAtPress : _lengthAtPress - shift);
                 break;
             case Drag.Volume:
                 host.SetPartVolume(_index, VolumeAt(PartRect(_index, SoundLane), point.Y));
                 break;
-            case Drag.MusicVolume when MusicRect() is { } music:
-                host.SetMusicVolume(VolumeAt(music, point.Y));
+            case Drag.Item:
+                host.PlaceItem(new EditorItem(_itemKind, _index), Snap(Math.Max(0, _startAtPress + shift), host, (_itemKind, _index)), _lengthAtPress);
                 break;
-            case Drag.Music:
-                host.MoveMusic(Math.Max(0, _valueAtPress + (point.X - _pressedAt.X) / pps));
+            case Drag.ItemStart:
+            {
+                var end = _startAtPress + _lengthAtPress;
+                var start = Math.Clamp(Snap(_startAtPress + shift, host, (_itemKind, _index)), 0, end - ClipRange.MinLength);
+                host.PlaceItem(new EditorItem(_itemKind, _index), start, end - start);
                 break;
-            case Drag.Text:
-                host.MoveText(_index, Snap(Math.Max(0, _startAtPress + (point.X - _pressedAt.X) / pps), host, _index));
+            }
+            case Drag.ItemEnd:
+            {
+                var end = Snap(_startAtPress + _lengthAtPress + shift, host, (_itemKind, _index));
+                host.PlaceItem(new EditorItem(_itemKind, _index), _startAtPress, Math.Max(ClipRange.MinLength, end - _startAtPress));
                 break;
-            case Drag.TextStart:
-                {
-                    var end = _startAtPress + _lengthAtPress;
-                    var start = Math.Clamp(Snap(_startAtPress + (point.X - _pressedAt.X) / pps, host, _index), 0, end - ClipRange.MinLength);
-                    host.ResizeText(_index, start, end - start);
-                    break;
-                }
-            case Drag.TextEnd:
-                {
-                    var end = Snap(_startAtPress + _lengthAtPress + (point.X - _pressedAt.X) / pps, host, _index);
-                    host.ResizeText(_index, _startAtPress, Math.Max(ClipRange.MinLength, end - _startAtPress));
-                    break;
-                }
+            }
+            case Drag.Sound:
+                host.MoveSound(_index, Snap(Math.Max(0, _startAtPress + shift), host, (EditorItemKind.Sound, _index)), TrackAt(point.Y));
+                break;
+            case Drag.SoundStart:
+            {
+                // Its start moves later: the sound starts later in the clip and later in its file, its end stays.
+                var by = Math.Clamp(shift, -Math.Min(_startAtPress, _fromAtPress), _lengthAtPress - ClipRange.MinLength);
+                host.TrimSound(_index, _startAtPress + by, _fromAtPress + by, _lengthAtPress - by);
+                break;
+            }
+            case Drag.SoundEnd:
+                host.TrimSound(_index, _startAtPress, _fromAtPress, Math.Max(ClipRange.MinLength, _lengthAtPress + shift));
+                break;
+            case Drag.SoundVolume when _index < edit.Sounds.Count:
+                host.SetSoundVolume(_index, VolumeAt(SoundRect(edit.Sounds[_index]), point.Y));
+                break;
             case Drag.Pending when Math.Abs(point.X - _pressedAt.X) >= DragThreshold:
-                if (_pendingLane == Lane.Music)
-                {
-                    _drag = Drag.Music;
-                    host.SelectMusic();
-                }
-                else if (_pendingLane == Lane.Video && _index >= 0 && edit.Parts.Count > 1)
+                if (_pendingLane == Lane.Video && _index >= 0 && edit.Parts.Count > 1)
                 {
                     _drag = Drag.Move;
                     host.SelectPart(_index, ClipSelect.Only);
@@ -932,17 +1034,20 @@ public sealed class EditorTimeline : Control
     }
 
     /// <summary>
-    /// <paramref name="seconds"/>, or the cut, the playhead or a text's end within <see cref="SnapDistance"/> pixels of
-    /// it (not text <paramref name="exceptText"/>'s own).
+    /// <paramref name="seconds"/>, or a cut, the playhead or another item's end within <see cref="SnapDistance"/>
+    /// pixels of it (not <paramref name="self"/>'s own).
     /// </summary>
-    private double Snap(double seconds, IEditorTimelineHost host, int exceptText)
+    private double Snap(double seconds, IEditorTimelineHost host, (EditorItemKind Kind, int Index)? self)
     {
         var pps = PixelsPerSecond();
         var edit = host.Edit;
         var points = edit.PartStarts().Append(edit.Length).Append(0.0);
         if (_drag != Drag.Playhead)
             points = points.Append(host.Playhead);
-        points = points.Concat(edit.Texts.Where((_, i) => i != exceptText).SelectMany(t => new[] { t.Start, t.Start + t.Length }));
+        points = points
+            .Concat(edit.Texts.Where((_, i) => self != (EditorItemKind.Text, i)).SelectMany(t => new[] { t.Start, t.Start + t.Length }))
+            .Concat(edit.Images.Where((_, i) => self != (EditorItemKind.Image, i)).SelectMany(t => new[] { t.Start, t.Start + t.Length }))
+            .Concat(edit.Sounds.Where((_, i) => self != (EditorItemKind.Sound, i)).SelectMany(s => new[] { s.Offset, s.Offset + s.PlayLength(Total) }));
         var best = seconds;
         var nearest = SnapDistance / pps;
         foreach (var point in points)
@@ -961,19 +1066,13 @@ public sealed class EditorTimeline : Control
         if (Host is not { } host)
             return null;
         var edit = host.Edit;
-        switch (LaneAt(point))
+        var (lane, _) = LaneAt(point);
+        switch (lane)
         {
             case Lane.Ruler:
                 return IbeamCursor;
-            case Lane.Text:
-                foreach (var text in edit.Texts)
-                {
-                    var rect = TextRect(text);
-                    if (!rect.Inflate(new Thickness(2, 0)).Contains(point))
-                        continue;
-                    return Math.Abs(point.X - rect.Right) <= EdgeGrab || Math.Abs(point.X - rect.X) <= EdgeGrab ? SizeWestEastCursor : SizeAllCursor;
-                }
-                return null;
+            case Lane.Text or Lane.Image when PillAt(point, lane) is { } pill:
+                return Math.Abs(point.X - pill.Rect.Right) <= EdgeGrab || Math.Abs(point.X - pill.Rect.X) <= EdgeGrab ? SizeWestEastCursor : SizeAllCursor;
             case Lane.Video or Lane.Sound:
                 for (var i = 0; i < edit.Parts.Count - 1; i++)
                 {
@@ -983,14 +1082,17 @@ public sealed class EditorTimeline : Control
                 if (EdgeAt(point) is not null)
                     return SizeWestEastCursor;
                 var index = PartAt(TimeAt(point.X));
-                if (index >= 0 && LaneAt(point) == Lane.Sound && !edit.Parts[index].Blank
+                if (index >= 0 && lane == Lane.Sound && !edit.Parts[index].Blank
                     && Math.Abs(point.Y - VolumeY(PartRect(index, SoundLane), edit.Parts[index].Volume)) <= 5)
                     return SizeNorthSouthCursor;
                 if (index >= 0 && edit.Parts[index].Blank)
                     return HandCursor;
-                return index >= 0 && LaneAt(point) == Lane.Video ? SizeAllCursor : null;
-            case Lane.Music when MusicRect() is { } music && music.Contains(point) && edit.Music is { } song:
-                return Math.Abs(point.Y - VolumeY(music, song.Volume)) <= 5 ? SizeNorthSouthCursor : SizeAllCursor;
+                return index >= 0 && lane == Lane.Video ? SizeAllCursor : null;
+            case Lane.Track when SoundAt(point) is >= 0 and var at:
+                var rect = SoundRect(edit.Sounds[at]);
+                return Math.Abs(point.Y - VolumeY(rect, edit.Sounds[at].Volume)) <= 5 ? SizeNorthSouthCursor
+                    : Math.Abs(point.X - rect.Right) <= EdgeGrab || Math.Abs(point.X - rect.X) <= EdgeGrab ? SizeWestEastCursor
+                    : SizeAllCursor;
             default:
                 return null;
         }
@@ -1003,9 +1105,6 @@ public sealed class EditorTimeline : Control
         {
             switch (_drag)
             {
-                case Drag.Pending when _pendingLane == Lane.Music:
-                    host.SelectMusic();
-                    break;
                 case Drag.Pending when _index >= 0:
                     host.SelectPart(_index, _pendingMode);
                     break;
@@ -1035,7 +1134,7 @@ public sealed class EditorTimeline : Control
     protected override void OnPointerWheelChanged(PointerWheelEventArgs e)
     {
         base.OnPointerWheelChanged(e);
-        // Ctrl + wheel belongs to the window (everything larger or smaller).
+        // Ctrl (Cmd) + wheel belongs to the window (everything larger or smaller).
         if (e.KeyModifiers.HasFlag(KeyModifiers.Control) || e.KeyModifiers.HasFlag(KeyModifiers.Meta))
             return;
         if (e.KeyModifiers.HasFlag(KeyModifiers.Alt))
