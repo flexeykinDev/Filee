@@ -150,7 +150,7 @@ tar -xzf Filee-2.0.0-linux-x64.tar.gz && cd Filee-2.0.0-linux-x64
 
 Жесты над файлами работают в X11 (и XWayland); в Wayland — окно для перетаскивания и пункт в файловом менеджере.
 
-**macOS 13+** (Apple Silicon — `osx-arm64`, Intel — `osx-x64`):
+**macOS 13+** (Apple Silicon — `osx-arm64`; пакета для Intel в этом релизе нет):
 
 ```bash
 tar -xzf Filee-2.0.0-osx-arm64.tar.gz && cd Filee-2.0.0-osx-arm64
