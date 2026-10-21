@@ -731,7 +731,7 @@ public class RenderTests
         {
             store.Presets.Add(group);
             images.PresetIds.Add(group.Id);
-            theme.Apply(new ThemeSettings { Mode = mode, CornerRadius = 0 }, "en");
+            theme.Apply(new ThemeSettings { Mode = mode, CornerRadius = 0, Pixel = false }, "en");
             var vm = AppHost.Get<RadialViewModel>();
             vm.Load([@"C:\photos\a.jpg", @"C:\photos\b.jpg"], clickMode: true);
             vm.FitToThisDonut();
@@ -744,7 +744,7 @@ public class RenderTests
             Save(window, $"donut-softness-0-{suffix}.png");
 
             // Changing the setting while the donut is open rounds it at once.
-            theme.Apply(new ThemeSettings { Mode = mode, CornerRadius = 28 }, "en");
+            theme.Apply(new ThemeSettings { Mode = mode, CornerRadius = 28, Pixel = false }, "en");
             Pump();
             Assert.Equal(14, donut.SliceCornerRadius);
             Save(window, $"donut-softness-28-{suffix}.png");
@@ -784,7 +784,7 @@ public class RenderTests
         var theme = AppHost.Get<ThemeService>();
         try
         {
-            theme.Apply(new ThemeSettings { Mode = ThemeMode.Light, CornerRadius = 28 }, "en");
+            theme.Apply(new ThemeSettings { Mode = ThemeMode.Light, CornerRadius = 28, Pixel = false }, "en");
             var vm = AppHost.Get<RadialViewModel>();
             vm.Load([@"C:\gis\roads.shp", @"C:\gis\parcels.shp"], clickMode: true);
             vm.FitToThisDonut();
@@ -976,7 +976,7 @@ public class RenderTests
     {
         TestServices.EnsureInitialized("en");
         var service = AppHost.Get<ThemeService>();
-        var dark = new ThemeSettings { Mode = ThemeMode.Dark };
+        var dark = new ThemeSettings { Mode = ThemeMode.Dark, Pixel = false };
         var custom = new CustomTheme
         {
             Dark = { ["page"] = "#101820", ["surface"] = "#18222C", ["surfaceAlt"] = "#22303C", ["text"] = "#E8E4D8" },

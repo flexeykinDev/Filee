@@ -848,6 +848,8 @@
   "theme.donut_opacity": "Opacidade do menu circular",
   "theme.reduce_motion": "Reduzir animações",
   "theme.reduce_motion_hint": "Recomendado para PCs mais antigos. Desliga as transições e o salto do menu.",
+  "theme.pixel": "Estilo pixel",
+  "theme.pixel_hint": "Escuro, quadrado e granulado: cantos em degraus, um único destaque lavanda, dígitos em pontos. Enquanto estiver ligado, ele define o modo, o destaque e os cantos abaixo.",
   "theme.preview": "Prévia",
 
   "engines.title": "Motores de conversão",
