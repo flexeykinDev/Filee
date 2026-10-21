@@ -132,7 +132,7 @@
 **Windows 10/11.** Скачайте `Filee-2.0.0-win-Setup.exe` и сверьте хеш:
 
 ```powershell
-Get-FileHash .\Filee-2.0.0-win-Setup.exe   # 3E7611D1B65E12F9C4B4C1EFA6B03A75CCA12460C9CC2B804218A33249AD1959
+Get-FileHash .\Filee-2.0.0-win-Setup.exe   # DB9B896F519F77DAD859B4D85253F22B838F08A019C8F0B355E51DD9551E6E4C
 ```
 
 Установщик не подписан, поэтому SmartScreen предупредит: «Подробнее» → «Выполнить в любом случае». Ставится поверх
