@@ -293,7 +293,6 @@
   "editor.title_sample": "Title",
   "editor.caption_sample": "Caption",
   "editor.label_sample": "Label",
-  "editor.music": "Music",
   "editor.music_fade": "Fade in and out",
   "editor.duck": "Music quieter under speech",
   "editor.duck_hint": "The music gives way while the video's own sound plays",

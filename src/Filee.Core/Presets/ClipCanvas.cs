@@ -247,13 +247,6 @@ public static class ClipCanvas
         return angle;
     }
 
-    /// <summary>The size of a <paramref name="width"/> × <paramref name="height"/> box turned by <paramref name="degrees"/>.</summary>
-    public static (double Width, double Height) Turned(double width, double height, double degrees)
-    {
-        var radians = degrees * Math.PI / 180;
-        var (sin, cos) = (Math.Abs(Math.Sin(radians)), Math.Abs(Math.Cos(radians)));
-        return (width * cos + height * sin, width * sin + height * cos);
-    }
 
     /// <summary>The red, green and blue of "#RRGGBB", or null.</summary>
     public static (byte R, byte G, byte B)? ParseColor(string? color)

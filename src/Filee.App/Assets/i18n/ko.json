@@ -293,7 +293,6 @@
   "editor.title_sample": "제목",
   "editor.caption_sample": "자막",
   "editor.label_sample": "라벨",
-  "editor.music": "음악",
   "editor.music_fade": "시작과 끝을 부드럽게",
   "editor.duck": "말소리에서 음악 줄이기",
   "editor.duck_hint": "동영상 자체 소리가 나는 동안 음악 소리를 줄입니다",

@@ -284,7 +284,6 @@
   "editor.title_sample": "タイトル",
   "editor.caption_sample": "字幕",
   "editor.label_sample": "ラベル",
-  "editor.music": "音楽",
   "editor.music_fade": "最初と最後をなめらかに",
   "editor.duck": "話し声の間は音楽を小さく",
   "editor.duck_hint": "動画自体の音が鳴っている間、音楽を下げます",

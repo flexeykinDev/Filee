@@ -327,35 +327,35 @@ public sealed class EditorPreview : Control
         switch (_drag)
         {
             case Drag.Move:
-            {
-                var nx = Math.Clamp(x + (point.X - _pressedAt.X) / frame.Width, 0, 1);
-                var ny = Math.Clamp(y + (point.Y - _pressedAt.Y) / frame.Height, 0, 1);
-                // The middle lines snap, across and down.
-                if (Math.Abs(nx - 0.5) * frame.Width < 6)
-                    nx = 0.5;
-                if (Math.Abs(ny - 0.5) * frame.Height < 6)
-                    ny = 0.5;
-                host.Transform(_dragItem, nx, ny, size, rotation);
-                return;
-            }
+                {
+                    var nx = Math.Clamp(x + (point.X - _pressedAt.X) / frame.Width, 0, 1);
+                    var ny = Math.Clamp(y + (point.Y - _pressedAt.Y) / frame.Height, 0, 1);
+                    // The middle lines snap, across and down.
+                    if (Math.Abs(nx - 0.5) * frame.Width < 6)
+                        nx = 0.5;
+                    if (Math.Abs(ny - 0.5) * frame.Height < 6)
+                        ny = 0.5;
+                    host.Transform(_dragItem, nx, ny, size, rotation);
+                    return;
+                }
             case Drag.Size:
-            {
-                var from = Distance(_pressedAt, _boxAtPress.Middle);
-                var to = Distance(point, _boxAtPress.Middle);
-                if (from > 1)
-                    host.Transform(_dragItem, x, y, size * to / from, rotation);
-                return;
-            }
+                {
+                    var from = Distance(_pressedAt, _boxAtPress.Middle);
+                    var to = Distance(point, _boxAtPress.Middle);
+                    if (from > 1)
+                        host.Transform(_dragItem, x, y, size * to / from, rotation);
+                    return;
+                }
             case Drag.Turn:
-            {
-                var middle = _boxAtPress.Middle;
-                var degrees = Math.Atan2(point.Y - middle.Y, point.X - middle.X) * 180 / Math.PI + 90;
-                var snapped = Math.Round(degrees / 90) * 90;
-                if (Math.Abs(degrees - snapped) < TurnSnap)
-                    degrees = snapped;
-                host.Transform(_dragItem, x, y, size, ClipCanvas.Angle(degrees));
-                return;
-            }
+                {
+                    var middle = _boxAtPress.Middle;
+                    var degrees = Math.Atan2(point.Y - middle.Y, point.X - middle.X) * 180 / Math.PI + 90;
+                    var snapped = Math.Round(degrees / 90) * 90;
+                    if (Math.Abs(degrees - snapped) < TurnSnap)
+                        degrees = snapped;
+                    host.Transform(_dragItem, x, y, size, ClipCanvas.Angle(degrees));
+                    return;
+                }
         }
         // No drag: the cursor says what a press would do.
         if (host.Framed is { } framed && BoxOf(framed) is { } box)

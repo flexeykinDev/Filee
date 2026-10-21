@@ -107,6 +107,7 @@ public sealed class EditorTimeline : Control
     private int _moveTo = -1;        // where a part being moved goes
     private double _dropAt = -1;     // where dropped files go (seconds), while they are dragged over
     private int _tracks = 1;         // sound tracks laid out
+    private double[]? _starts;       // where each part starts, worked out once per change
     private IEditorTimelineHost? _hooked;
 
     static EditorTimeline()
@@ -169,6 +170,7 @@ public sealed class EditorTimeline : Control
 
     private void OnHostChanged()
     {
+        _starts = null;
         if (Host is not { } host)
             return;
         if (host.SoundTracks != _tracks)
@@ -253,12 +255,21 @@ public sealed class EditorTimeline : Control
     /// <summary>The sound track under <paramref name="y"/> (the nearest one above or below).</summary>
     private int TrackAt(double y) => Math.Clamp((int)Math.Floor((y - TrackLane(0).Y) / (MusicHeight + LaneGap)), 0, Math.Max(0, _tracks - 1));
 
+    /// <summary>Where each part starts playing (kept until the clip changes).</summary>
+    private double[] Starts()
+    {
+        var edit = Host!.Edit;
+        if (_starts is not { } starts || starts.Length != edit.Parts.Count)
+            _starts = starts = edit.PartStarts();
+        return starts;
+    }
+
     /// <summary>The part playing at <paramref name="seconds"/> (the incoming one in a transition), or -1.</summary>
     private int PartAt(double seconds)
     {
         if (Host is not { } host)
             return -1;
-        var starts = host.Edit.PartStarts();
+        var starts = Starts();
         for (var i = starts.Length - 1; i >= 0; i--)
         {
             if (seconds >= starts[i] && seconds <= starts[i] + host.Edit.Parts[i].Length)
@@ -270,7 +281,7 @@ public sealed class EditorTimeline : Control
     private Rect PartRect(int index, Rect lane)
     {
         var edit = Host!.Edit;
-        var start = edit.PartStarts()[index];
+        var start = Starts()[index];
         var x0 = XOf(start);
         var x1 = XOf(start + edit.Parts[index].Length);
         return new Rect(x0, lane.Y, Math.Max(1, x1 - x0), lane.Height);
@@ -280,7 +291,7 @@ public sealed class EditorTimeline : Control
     private Rect TransitionButton(int index)
     {
         var edit = Host!.Edit;
-        var join = edit.PartStarts()[index + 1] + edit.Overlap(index) / 2;
+        var join = Starts()[index + 1] + edit.Overlap(index) / 2;
         var x = XOf(join);
         return new Rect(x - TransitionSize / 2, VideoLane.Center.Y - TransitionSize / 2, TransitionSize, TransitionSize);
     }
@@ -306,7 +317,7 @@ public sealed class EditorTimeline : Control
         using (context.PushClip(new Rect(Content.X - 2, 0, Content.Width + 4, Bounds.Height)))
         {
             DrawRuler(context);
-            var starts = edit.PartStarts();
+            var starts = Starts();
             for (var i = 0; i < edit.Parts.Count; i++)
             {
                 if (_drag == Drag.Move && i == _index)
@@ -542,7 +553,7 @@ public sealed class EditorTimeline : Control
         var overlap = edit.Overlap(index);
         if (overlap > 0)
         {
-            var start = edit.PartStarts()[index + 1];
+            var start = Starts()[index + 1];
             using (context.PushOpacity(0.35))
                 context.FillRectangle(accent, new Rect(XOf(start), VideoLane.Y, overlap * PixelsPerSecond(), VideoLane.Height));
         }
@@ -766,7 +777,7 @@ public sealed class EditorTimeline : Control
         if (Host is not { } host)
             return null;
         var edit = host.Edit;
-        var starts = edit.PartStarts();
+        var starts = Starts();
         (int, bool)? best = null;
         var nearest = EdgeGrab;
         for (var i = 0; i < edit.Parts.Count; i++)
@@ -889,7 +900,7 @@ public sealed class EditorTimeline : Control
                     _drag = Drag.Edge;
                     _index = edge.Index;
                     _dragEnd = edge.End;
-                    _startAtPress = edit.PartStarts()[edge.Index];
+                    _startAtPress = Starts()[edge.Index];
                     _lengthAtPress = edit.Parts[edge.Index].Length;
                     host.SelectPart(edge.Index, ClipSelect.Only);
                     return;
@@ -919,18 +930,18 @@ public sealed class EditorTimeline : Control
                 _index = index;
                 return;
             case Lane.Track when SoundAt(point) is >= 0 and var at:
-            {
-                var sound = edit.Sounds[at];
-                var rect2 = SoundRect(sound);
-                _index = at;
-                (_startAtPress, _fromAtPress, _lengthAtPress, _trackAtPress) = (sound.Offset, sound.From, sound.PlayLength(Total), sound.Track);
-                host.Select(new EditorItem(EditorItemKind.Sound, at));
-                _drag = Math.Abs(point.Y - VolumeY(rect2, sound.Volume)) <= 5 ? Drag.SoundVolume
-                    : Math.Abs(point.X - rect2.Right) <= EdgeGrab ? Drag.SoundEnd
-                    : Math.Abs(point.X - rect2.X) <= EdgeGrab ? Drag.SoundStart
-                    : Drag.Sound;
-                return;
-            }
+                {
+                    var sound = edit.Sounds[at];
+                    var rect2 = SoundRect(sound);
+                    _index = at;
+                    (_startAtPress, _fromAtPress, _lengthAtPress, _trackAtPress) = (sound.Offset, sound.From, sound.PlayLength(Total), sound.Track);
+                    host.Select(new EditorItem(EditorItemKind.Sound, at));
+                    _drag = Math.Abs(point.Y - VolumeY(rect2, sound.Volume)) <= 5 ? Drag.SoundVolume
+                        : Math.Abs(point.X - rect2.Right) <= EdgeGrab ? Drag.SoundEnd
+                        : Math.Abs(point.X - rect2.X) <= EdgeGrab ? Drag.SoundStart
+                        : Drag.Sound;
+                    return;
+                }
         }
         // An empty place: nothing selected, the playhead there.
         _drag = Drag.Playhead;
@@ -974,28 +985,28 @@ public sealed class EditorTimeline : Control
                 host.PlaceItem(new EditorItem(_itemKind, _index), Snap(Math.Max(0, _startAtPress + shift), host, (_itemKind, _index)), _lengthAtPress);
                 break;
             case Drag.ItemStart:
-            {
-                var end = _startAtPress + _lengthAtPress;
-                var start = Math.Clamp(Snap(_startAtPress + shift, host, (_itemKind, _index)), 0, end - ClipRange.MinLength);
-                host.PlaceItem(new EditorItem(_itemKind, _index), start, end - start);
-                break;
-            }
+                {
+                    var end = _startAtPress + _lengthAtPress;
+                    var start = Math.Clamp(Snap(_startAtPress + shift, host, (_itemKind, _index)), 0, end - ClipRange.MinLength);
+                    host.PlaceItem(new EditorItem(_itemKind, _index), start, end - start);
+                    break;
+                }
             case Drag.ItemEnd:
-            {
-                var end = Snap(_startAtPress + _lengthAtPress + shift, host, (_itemKind, _index));
-                host.PlaceItem(new EditorItem(_itemKind, _index), _startAtPress, Math.Max(ClipRange.MinLength, end - _startAtPress));
-                break;
-            }
+                {
+                    var end = Snap(_startAtPress + _lengthAtPress + shift, host, (_itemKind, _index));
+                    host.PlaceItem(new EditorItem(_itemKind, _index), _startAtPress, Math.Max(ClipRange.MinLength, end - _startAtPress));
+                    break;
+                }
             case Drag.Sound:
                 host.MoveSound(_index, Snap(Math.Max(0, _startAtPress + shift), host, (EditorItemKind.Sound, _index)), TrackAt(point.Y));
                 break;
             case Drag.SoundStart:
-            {
-                // Its start moves later: the sound starts later in the clip and later in its file, its end stays.
-                var by = Math.Clamp(shift, -Math.Min(_startAtPress, _fromAtPress), _lengthAtPress - ClipRange.MinLength);
-                host.TrimSound(_index, _startAtPress + by, _fromAtPress + by, _lengthAtPress - by);
-                break;
-            }
+                {
+                    // Its start moves later: the sound starts later in the clip and later in its file, its end stays.
+                    var by = Math.Clamp(shift, -Math.Min(_startAtPress, _fromAtPress), _lengthAtPress - ClipRange.MinLength);
+                    host.TrimSound(_index, _startAtPress + by, _fromAtPress + by, _lengthAtPress - by);
+                    break;
+                }
             case Drag.SoundEnd:
                 host.TrimSound(_index, _startAtPress, _fromAtPress, Math.Max(ClipRange.MinLength, _lengthAtPress + shift));
                 break;
@@ -1020,7 +1031,7 @@ public sealed class EditorTimeline : Control
     private int MoveTarget(double x)
     {
         var edit = Host!.Edit;
-        var starts = edit.PartStarts();
+        var starts = Starts();
         var seconds = TimeAt(x);
         var target = 0;
         for (var i = 0; i < edit.Parts.Count; i++)
@@ -1041,7 +1052,7 @@ public sealed class EditorTimeline : Control
     {
         var pps = PixelsPerSecond();
         var edit = host.Edit;
-        var points = edit.PartStarts().Append(edit.Length).Append(0.0);
+        var points = Starts().Append(edit.Length).Append(0.0);
         if (_drag != Drag.Playhead)
             points = points.Append(host.Playhead);
         points = points
@@ -1190,7 +1201,7 @@ public sealed class EditorTimeline : Control
     {
         var index = DropIndex(x);
         var edit = Host!.Edit;
-        return index >= edit.Parts.Count ? edit.Length : edit.PartStarts()[index];
+        return index >= edit.Parts.Count ? edit.Length : Starts()[index];
     }
 
     private int DropIndex(double x)
@@ -1199,7 +1210,7 @@ public sealed class EditorTimeline : Control
             return 0;
         var edit = host.Edit;
         var seconds = TimeAt(x);
-        var starts = edit.PartStarts();
+        var starts = Starts();
         for (var i = 0; i < edit.Parts.Count; i++)
         {
             if (seconds < starts[i] + edit.Parts[i].Length / 2)

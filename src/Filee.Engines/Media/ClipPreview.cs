@@ -116,6 +116,9 @@ public static partial class ClipPreview
             var stamp = new FileInfo(file);
             if (!Probed.TryGetValue(file, out var known) || known.Written != stamp.LastWriteTimeUtc || known.Size != stamp.Length)
             {
+                // A long session reads many files: what is kept stays small.
+                if (Probed.Count > 256)
+                    Probed.Clear();
                 known = (stamp.LastWriteTimeUtc, stamp.Length, await MediaInfo.ProbeAsync(ffprobe, file, cancellationToken).ConfigureAwait(false));
                 Probed[file] = known;
             }

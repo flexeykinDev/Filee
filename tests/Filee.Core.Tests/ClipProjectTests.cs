@@ -318,12 +318,10 @@ public class ClipProjectTests
         Assert.Equal((1.0, 0.5), ClipCanvas.Drag(1920, 1080, 0.5, 0.5, 5000, 0));
         Assert.Equal(((byte)255, (byte)212, (byte)59), ClipCanvas.ParseColor("#FFD43B"));
         Assert.Null(ClipCanvas.ParseColor("red"));
-        // Angles and turned boxes.
+        // Angles as written.
         Assert.Equal(-90, ClipCanvas.Angle(270));
         Assert.Equal(180, ClipCanvas.Angle(-180));
-        var (w, h) = ClipCanvas.Turned(100, 50, 90);
-        Near(50, w, 1e-9);
-        Near(100, h, 1e-9);
+        Assert.Equal(0, ClipCanvas.Angle(double.NaN));
     }
 
     [Fact]

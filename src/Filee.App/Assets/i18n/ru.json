@@ -293,7 +293,6 @@
   "editor.title_sample": "Заголовок",
   "editor.caption_sample": "Подпись",
   "editor.label_sample": "Метка",
-  "editor.music": "Музыка",
   "editor.music_fade": "Плавно в начале и в конце",
   "editor.duck": "Музыка тише под речью",
   "editor.duck_hint": "Музыка приглушается, пока звучит звук самого видео",

@@ -517,8 +517,9 @@ public sealed partial class ClipEditorViewModel : ObservableObject, IEditorTimel
     }
 
     /// <summary>
-    /// Takes a file out of the project: its card, and its parts, sounds and pictures in the clip (one undo step brings
-    /// them back, not the card). Refused when nothing of the video would be left to play.
+    /// Takes a file out of the project: its card, and its parts, sounds and pictures in the clip (Undo brings them and
+    /// the card back: what was read of the file stays until the editor closes). Refused when nothing of the video would
+    /// be left to play.
     /// </summary>
     [RelayCommand]
     public void RemoveMedia(EditorMedia? media)
@@ -532,13 +533,7 @@ public sealed partial class ClipEditorViewModel : ObservableObject, IEditorTimel
             ShowMessage(_loc["editor.cannot_remove_file"]);
             return;
         }
-        // The window's video stays known (the conversion reads it): only its card goes.
         Files.Remove(media);
-        if (!string.Equals(media.Path, _mainKey, StringComparison.OrdinalIgnoreCase))
-        {
-            _media.Remove(media.Path);
-            media.Release();
-        }
         ClearSelection();
     }
 
@@ -690,13 +685,18 @@ public sealed partial class ClipEditorViewModel : ObservableObject, IEditorTimel
             HasSounds = _project.Sounds.Count > 0;
             if (Selection is EditorSelection.Text or EditorSelection.Image or EditorSelection.Sound or EditorSelection.Transition && SelectedItem is null)
                 Selection = EditorSelection.None;
-            foreach (var media in Files)
+            foreach (var media in _media.Values)
+            {
                 media.IsUsed = media.Kind switch
                 {
                     EditorMediaKind.Video => _project.Parts.Any(p => !p.Blank && string.Equals(p.Source ?? _mainKey, media.Path, StringComparison.OrdinalIgnoreCase)),
                     EditorMediaKind.Sound => _project.Sounds.Any(s => string.Equals(Path.GetFullPath(s.Path), media.Path, StringComparison.OrdinalIgnoreCase)),
                     _ => _project.Images.Any(i => string.Equals(Path.GetFullPath(i.Path), media.Path, StringComparison.OrdinalIgnoreCase)),
                 };
+                // A file taken out of the project and brought back by Undo gets its card back.
+                if (media.IsUsed && !Files.Contains(media))
+                    Files.Add(media);
+            }
             UpdateSelectionDetail();
             foreach (var name in PropertyNames)
                 OnPropertyChanged(name);
@@ -1304,6 +1304,6 @@ public sealed partial class ClipEditorViewModel : ObservableObject, IEditorTimel
             media.Release();
         _media.Clear();
         Files.Clear();
-        _life.Dispose();
+        // _life is cancelled, not disposed: work still finishing may ask for its token.
     }
 }

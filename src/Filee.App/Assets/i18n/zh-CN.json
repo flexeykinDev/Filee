@@ -293,7 +293,6 @@
   "editor.title_sample": "标题",
   "editor.caption_sample": "字幕",
   "editor.label_sample": "标签",
-  "editor.music": "音乐",
   "editor.music_fade": "开头和结尾淡入淡出",
   "editor.duck": "说话时降低音乐",
   "editor.duck_hint": "视频自身声音响起时，音乐自动变小",

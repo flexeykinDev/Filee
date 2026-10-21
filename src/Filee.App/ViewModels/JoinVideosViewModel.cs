@@ -183,5 +183,6 @@ public sealed partial class JoinVideosViewModel : ObservableObject
     {
         _cancel.Cancel();
         CloseRequested?.Invoke();
+        CloseRequested = null;
     }
 }
