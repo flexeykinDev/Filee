@@ -588,6 +588,8 @@
   "presets.location.Subfolder": "サブフォルダー",
   "presets.location.CustomFolder": "指定したフォルダー",
   "presets.subfolder": "サブフォルダー名",
+  "presets.subfolder_only_several": "複数のファイルになるときだけ",
+  "presets.subfolder_only_several_hint": "1つのファイルに変換されたときは元のファイルの隣に保存し、複数のファイルになるとき（PDFをページごとに分けるときなど）だけサブフォルダーを作ります。",
   "presets.custom_folder": "フォルダー",
   "presets.browse": "参照…",
   "presets.pattern": "ファイル名",

@@ -158,6 +158,7 @@ public sealed partial class PresetEditorViewModel : ObservableObject
         _pdfA = _edit.Document.PdfA;
         _leaveOutPictures = _edit.Document.LeaveOutPictures;
         _subfolderName = _edit.Output.SubfolderName;
+        _subfolderOnlyForSeveralFiles = _edit.Output.SubfolderOnlyForSeveralFiles;
         _customFolder = _edit.Output.CustomFolder;
         _pattern = _edit.Output.FileNamePattern;
         _keepDates = _edit.Output.KeepDates;
@@ -393,6 +394,8 @@ public sealed partial class PresetEditorViewModel : ObservableObject
     /// <summary>Markdown: the text only, no picture folder next to it (DocumentOptions.LeaveOutPictures).</summary>
     [ObservableProperty] private bool _leaveOutPictures;
     [ObservableProperty] private string _subfolderName;
+    /// <summary>The subfolder only for a file that becomes several (OutputRule.SubfolderOnlyForSeveralFiles).</summary>
+    [ObservableProperty] private bool _subfolderOnlyForSeveralFiles;
     [ObservableProperty] private string _customFolder;
     [ObservableProperty] private string _pattern;
     [ObservableProperty] private bool _keepDates;
@@ -630,6 +633,8 @@ public sealed partial class PresetEditorViewModel : ObservableObject
         var output = _original.Output;
         output.Location = Location.Value;
         output.SubfolderName = string.IsNullOrWhiteSpace(SubfolderName) ? "converted" : SubfolderName.Trim();
+        // Only with a subfolder, where it is offered: a box ticked there must not stay on hidden behind another location.
+        output.SubfolderOnlyForSeveralFiles = ShowSubfolder && SubfolderOnlyForSeveralFiles;
         output.CustomFolder = CustomFolder.Trim();
         output.FileNamePattern = string.IsNullOrWhiteSpace(Pattern) ? "{name}" : Pattern.Trim();
         output.Conflict = Conflict.Value;

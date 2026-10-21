@@ -603,6 +603,8 @@
   "presets.location.Subfolder": "Podfolder",
   "presets.location.CustomFolder": "Stały folder",
   "presets.subfolder": "Nazwa podfolderu",
+  "presets.subfolder_only_several": "Tylko gdy powstaje kilka plików",
+  "presets.subfolder_only_several_hint": "Plik przekonwertowany na jeden plik zostaje zapisany obok oryginału; podfolder powstaje tylko wtedy, gdy powstaje kilka plików (PDF podzielony na strony).",
   "presets.custom_folder": "Folder",
   "presets.browse": "Przeglądaj…",
   "presets.pattern": "Nazwa pliku",

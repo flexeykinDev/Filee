@@ -588,6 +588,8 @@
   "presets.location.Subfolder": "एक सबफ़ोल्डर",
   "presets.location.CustomFolder": "एक तय फ़ोल्डर",
   "presets.subfolder": "सबफ़ोल्डर का नाम",
+  "presets.subfolder_only_several": "सिर्फ़ तब, जब कई फ़ाइलें बनें",
+  "presets.subfolder_only_several_hint": "एक फ़ाइल बनने पर वह मूल फ़ाइल के पास सेव होती है; सबफ़ोल्डर सिर्फ़ तब बनता है जब कई फ़ाइलें बनें (जैसे PDF को पेजों में बाँटने पर)।",
   "presets.custom_folder": "फ़ोल्डर",
   "presets.browse": "ब्राउज़ करें…",
   "presets.pattern": "फ़ाइल का नाम",

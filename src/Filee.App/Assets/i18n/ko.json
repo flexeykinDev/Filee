@@ -603,6 +603,8 @@
   "presets.location.Subfolder": "하위 폴더",
   "presets.location.CustomFolder": "지정한 폴더",
   "presets.subfolder": "하위 폴더 이름",
+  "presets.subfolder_only_several": "여러 파일이 될 때만",
+  "presets.subfolder_only_several_hint": "한 파일로 변환되면 원본 옆에 저장하고, 여러 파일이 될 때(PDF를 페이지별로 나눌 때 등)만 하위 폴더를 만듭니다.",
   "presets.custom_folder": "폴더",
   "presets.browse": "찾아보기…",
   "presets.pattern": "파일 이름",

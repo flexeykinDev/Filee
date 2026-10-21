@@ -588,6 +588,8 @@
   "presets.location.Subfolder": "مجلد فرعي",
   "presets.location.CustomFolder": "مجلد ثابت",
   "presets.subfolder": "اسم المجلد الفرعي",
+  "presets.subfolder_only_several": "فقط عندما ينتج أكثر من ملف",
+  "presets.subfolder_only_several_hint": "إذا نتج عن التحويل ملف واحد فإنه يُحفظ بجانب الأصل؛ ولا يُنشأ المجلد الفرعي إلا عندما ينتج عدة ملفات (مثل تقسيم PDF إلى صفحات).",
   "presets.custom_folder": "المجلد",
   "presets.browse": "استعراض…",
   "presets.pattern": "اسم الملف",

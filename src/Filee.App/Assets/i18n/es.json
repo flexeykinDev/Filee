@@ -588,6 +588,8 @@
   "presets.location.Subfolder": "Una subcarpeta",
   "presets.location.CustomFolder": "Una carpeta fija",
   "presets.subfolder": "Nombre de la subcarpeta",
+  "presets.subfolder_only_several": "Solo si salen varios archivos",
+  "presets.subfolder_only_several_hint": "Si un archivo se convierte en uno solo, se guarda junto al original; la subcarpeta solo se crea cuando salen varios archivos (un PDF dividido en páginas).",
   "presets.custom_folder": "Carpeta",
   "presets.browse": "Examinar…",
   "presets.pattern": "Nombre del archivo",

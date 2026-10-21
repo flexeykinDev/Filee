@@ -1068,6 +1068,35 @@ public class RenderTests
     }
 
     [AvaloniaFact]
+    public void Preset_editor_offers_the_subfolder_only_for_several_files_with_a_subfolder()
+    {
+        TestServices.EnsureInitialized("en");
+        var loc = AppHost.Get<Filee.Core.Localization.ILocalizer>();
+        // PDF → page images saves into a folder per document.
+        var preset = Filee.Core.Presets.BuiltInData.CreatePresets().Single(p => p.Id == "pdf-split");
+        var vm = new PresetEditorViewModel(preset, loc);
+        Assert.True(vm.ShowSubfolder);
+        Assert.False(vm.SubfolderOnlyForSeveralFiles);
+
+        vm.SubfolderOnlyForSeveralFiles = true;
+        var window = new PresetEditorWindow { DataContext = vm, Height = 1400 };
+        window.Show();
+        Pump();
+        Save(window, "preset-subfolder-en.png");
+        window.Close();
+        Assert.True(vm.Apply());
+        Assert.True(preset.Output.SubfolderOnlyForSeveralFiles);
+
+        // Hidden with another location, and not kept on behind it.
+        vm = new PresetEditorViewModel(preset, loc);
+        Assert.True(vm.SubfolderOnlyForSeveralFiles);
+        vm.Location = vm.Locations.Single(l => l.Value == Filee.Core.Presets.OutputLocation.SameFolder);
+        Assert.False(vm.ShowSubfolder);
+        Assert.True(vm.Apply());
+        Assert.False(preset.Output.SubfolderOnlyForSeveralFiles);
+    }
+
+    [AvaloniaFact]
     public void Preset_editor_keeps_rotation_visible_for_pdf_and_drops_it_for_targets_that_cannot_turn()
     {
         TestServices.EnsureInitialized("en");

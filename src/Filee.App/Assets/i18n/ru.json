@@ -603,6 +603,8 @@
   "presets.location.Subfolder": "Во вложенную папку",
   "presets.location.CustomFolder": "В заданную папку",
   "presets.subfolder": "Имя вложенной папки",
+  "presets.subfolder_only_several": "Только если файлов получается несколько",
+  "presets.subfolder_only_several_hint": "Если из файла получается один файл, он сохраняется рядом с оригиналом; вложенная папка создаётся, только когда файлов несколько (например, PDF разбит на страницы).",
   "presets.custom_folder": "Папка",
   "presets.browse": "Обзор…",
   "presets.pattern": "Имя файла",

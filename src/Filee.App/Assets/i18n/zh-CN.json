@@ -603,6 +603,8 @@
   "presets.location.Subfolder": "子文件夹",
   "presets.location.CustomFolder": "指定文件夹",
   "presets.subfolder": "子文件夹名称",
+  "presets.subfolder_only_several": "仅在生成多个文件时",
+  "presets.subfolder_only_several_hint": "只生成一个文件时保存在原文件旁边；生成多个文件时（例如 PDF 拆分成页面）才新建子文件夹。",
   "presets.custom_folder": "文件夹",
   "presets.browse": "浏览…",
   "presets.pattern": "文件名",
