@@ -40,8 +40,8 @@ public sealed class ClipPart
     /// <summary>The longest still (<see cref="Hold"/>) and transition, in seconds.</summary>
     public const double MaxHold = 30, MaxTransition = 2;
 
-    /// <summary>The closest look at the picture (<see cref="Zoom"/>): three times as close.</summary>
-    public const double MaxZoom = 3;
+    /// <summary>The closest look at the picture (<see cref="Zoom"/>): three times as close; and the smallest, a fifth.</summary>
+    public const double MaxZoom = 3, MinZoom = 0.2;
 
     /// <summary>The steps a smooth speed change is written in (each at its own speed; together exactly as long).</summary>
     public const int RampSteps = 10;
@@ -94,13 +94,13 @@ public sealed class ClipPart
     /// <summary>How long the transition into the next part takes, in seconds.</summary>
     public double TransitionSeconds { get; set; } = 0.5;
 
-    /// <summary>How close the picture is looked at: 1 as it is, up to <see cref="MaxZoom"/>.</summary>
+    /// <summary>How large the picture is: 1 as it fits (or fills) the frame, <see cref="MinZoom"/> to <see cref="MaxZoom"/>.</summary>
     public double Zoom { get; set; } = 1;
 
-    /// <summary>
-    /// Which part of a picture larger than the frame is shown, across and down: 0 its left (top) edge, 0.5 its middle,
-    /// 1 its right (bottom) edge.
-    /// </summary>
+    /// <summary>The picture turned clockwise, in degrees.</summary>
+    public double Rotation { get; set; }
+
+    /// <summary>Where the picture's middle is in the frame, across and down: 0.5 the middle, 0 the left (top) edge.</summary>
     public double FocusX { get; set; } = 0.5;
 
     /// <summary>The same as <see cref="FocusX"/>, down.</summary>
@@ -122,9 +122,13 @@ public sealed class ClipPart
     [JsonIgnore]
     public bool IsStill => !Blank && Hold > 0 && double.IsFinite(Hold);
 
-    /// <summary><see cref="Zoom"/> as written: 1 to <see cref="MaxZoom"/>.</summary>
+    /// <summary><see cref="Zoom"/> as written: <see cref="MinZoom"/> to <see cref="MaxZoom"/>.</summary>
     [JsonIgnore]
-    public double PlayZoom => double.IsFinite(Zoom) ? Math.Clamp(Zoom, 1, MaxZoom) : 1;
+    public double PlayZoom => double.IsFinite(Zoom) ? Math.Clamp(Zoom, MinZoom, MaxZoom) : 1;
+
+    /// <summary><see cref="Rotation"/> as written: −180 to 180 degrees.</summary>
+    [JsonIgnore]
+    public double PlayRotation => ClipCanvas.Angle(Rotation);
 
     /// <summary><see cref="Volume"/> as written: within its limits, 1 for a value that makes no sense, 0 when muted.</summary>
     [JsonIgnore]
@@ -140,7 +144,7 @@ public sealed class ClipPart
 
     /// <summary>True when the part plays as recorded: full volume, normal speed, not a pause.</summary>
     [JsonIgnore]
-    public bool IsPlain => !Blank && !Muted && PlayVolume == 1 && PlaySpeed == 1 && !IsRamp && !IsStill && !Reverse && PlayZoom == 1;
+    public bool IsPlain => !Blank && !Muted && PlayVolume == 1 && PlaySpeed == 1 && !IsRamp && !IsStill && !Reverse && PlayZoom == 1 && PlayRotation == 0;
 
     public ClipPart Clone() => (ClipPart)MemberwiseClone();
 
@@ -283,12 +287,48 @@ public sealed class ClipMusic
     /// <summary>Fade in and out at its ends (<see cref="FadeSeconds"/>).</summary>
     public bool Fade { get; set; } = true;
 
+    /// <summary>The editor's sound track it is on: 0 for A2, 1 for A3, and so on.</summary>
+    public int Track { get; set; }
+
+    /// <summary>How long it plays at most, in seconds (0: until the file or the clip ends).</summary>
+    public double Play { get; set; }
+
     /// <summary><see cref="Volume"/> as written: 0 to 2, the default for a value that makes no sense.</summary>
     [JsonIgnore]
     public double PlayVolume => double.IsFinite(Volume) && Volume >= 0 ? Math.Min(Volume, 2) : DefaultVolume;
 
     /// <summary>How long the music plays in a clip of <paramref name="clipLength"/> seconds: until it or the clip ends.</summary>
-    public double PlayLength(double clipLength) => Math.Max(0, Math.Min(Length - From, clipLength - Offset));
+    public double PlayLength(double clipLength) =>
+        Math.Max(0, Math.Min(Math.Min(Length - From, clipLength - Offset), Play > 0 && double.IsFinite(Play) ? Play : double.MaxValue));
+
+    /// <summary>
+    /// The sound as written under a clip of <paramref name="clipLength"/> seconds: inside its file and the clip, its volume
+    /// within limits; null when nothing of it plays.
+    /// </summary>
+    public ClipMusic? Clamped(double clipLength)
+    {
+        if (Path.Length == 0 || !double.IsFinite(Offset) || !double.IsFinite(From) || !double.IsFinite(Length))
+            return null;
+        var kept = Clone();
+        kept.Offset = Math.Max(0, kept.Offset);
+        kept.From = Math.Clamp(kept.From, 0, Math.Max(0, kept.Length));
+        kept.Volume = kept.PlayVolume;
+        kept.Track = Math.Max(0, kept.Track);
+        kept.Play = kept.Play > 0 && double.IsFinite(kept.Play) ? kept.Play : 0;
+        return kept.PlayLength(clipLength) >= ClipRange.MinLength ? kept : null;
+    }
+
+    /// <summary>What plays of it from <paramref name="seconds"/> into the clip on (it keeps its place against the pictures).</summary>
+    public ClipMusic After(double seconds)
+    {
+        var rest = Clone();
+        var played = Math.Max(0, seconds - Offset);
+        rest.From += played;
+        rest.Offset = Math.Max(0, Offset - Math.Max(0, seconds));
+        if (rest.Play > 0)
+            rest.Play = Math.Max(0.001, rest.Play - played);
+        return rest;
+    }
 
     public ClipMusic Clone() => (ClipMusic)MemberwiseClone();
 }
@@ -321,6 +361,16 @@ public sealed class ClipEdit
 
     /// <summary>Texts over the picture.</summary>
     public List<ClipText> Texts { get; set; } = [];
+
+    /// <summary>Pictures over the video (a logo, a photo, a sticker).</summary>
+    public List<ClipImage> Images { get; set; } = [];
+
+    /// <summary>Sounds from other files under the clip, on the editor's tracks A2, A3, … (besides <see cref="Music"/>).</summary>
+    public List<ClipMusic> Sounds { get; set; } = [];
+
+    /// <summary>Every sound under the clip: <see cref="Music"/> and <see cref="Sounds"/>.</summary>
+    [JsonIgnore]
+    public IEnumerable<ClipMusic> AllSounds => Music is null ? Sounds : Sounds.Prepend(Music);
 
     /// <summary>The frame's shape, one of <see cref="ClipCanvas.Aspects"/>; null for the first video's.</summary>
     public string? Aspect { get; set; }
@@ -369,7 +419,7 @@ public sealed class ClipEdit
     /// Anything else is encoded.
     /// </summary>
     [JsonIgnore]
-    public bool IsPlainCut => !Editor && Parts.Count == 1 && Parts[0].IsPlain && Fade(FadeIn) == 0 && Fade(FadeOut) == 0 && Music is null;
+    public bool IsPlainCut => !Editor && Parts.Count == 1 && Parts[0].IsPlain && Fade(FadeIn) == 0 && Fade(FadeOut) == 0 && Music is null && Sounds.Count == 0;
 
     /// <summary>A fade as written: 0 to <see cref="MaxFade"/> seconds.</summary>
     public static double Fade(double seconds) => double.IsFinite(seconds) ? Math.Clamp(seconds, 0, MaxFade) : 0;
@@ -382,6 +432,8 @@ public sealed class ClipEdit
         var copy = (ClipEdit)MemberwiseClone();
         copy.Parts = Parts.Select(p => p.Clone()).ToList();
         copy.Texts = Texts.Select(t => t.Clone()).ToList();
+        copy.Images = Images.Select(i => i.Clone()).ToList();
+        copy.Sounds = Sounds.Select(s => s.Clone()).ToList();
         copy.Music = Music?.Clone();
         return copy;
     }
@@ -457,6 +509,7 @@ public sealed class ClipEdit
             {
                 copy.SpeedEnd = part.IsRamp ? part.PlaySpeedEnd : 0;
                 copy.Zoom = part.PlayZoom;
+                copy.Rotation = part.PlayRotation;
                 copy.FocusX = double.IsFinite(part.FocusX) ? Math.Clamp(part.FocusX, 0, 1) : 0.5;
                 copy.FocusY = double.IsFinite(part.FocusY) ? Math.Clamp(part.FocusY, 0, 1) : 0.5;
                 copy.TransitionSeconds = TransitionLength(part);
@@ -480,6 +533,7 @@ public sealed class ClipEdit
                 copy.SpeedEnd = 0;
                 copy.Transition = ClipTransitionKind.Cut;
                 copy.Zoom = 1;
+                copy.Rotation = 0;
                 copy.FocusX = copy.FocusY = 0.5;
             }
             if (end - start < ClipRange.MinLength)
@@ -528,19 +582,32 @@ public sealed class ClipEdit
                 kept.X = double.IsFinite(text.X) ? Math.Clamp(text.X, 0, 1) : 0.5;
                 kept.Y = double.IsFinite(text.Y) ? Math.Clamp(text.Y, 0, 1) : 0.5;
                 kept.Size = text.PlaySize;
+                kept.Opacity = text.PlayOpacity;
+                kept.Rotation = ClipCanvas.Angle(text.Rotation);
                 clip.Texts.Add(kept);
             }
+            foreach (var image in Images)
+            {
+                if (string.IsNullOrEmpty(image.Path) || !double.IsFinite(image.Start) || !double.IsFinite(image.Length))
+                    continue;
+                var start = Math.Clamp(image.Start, 0, total);
+                var end = Math.Min(total, image.Start + image.Length);
+                if (end - start < ClipRange.MinLength)
+                    continue;
+                var kept = image.Clone();
+                kept.Start = start;
+                kept.Length = end - start;
+                kept.X = double.IsFinite(image.X) ? Math.Clamp(image.X, 0, 1) : 0.5;
+                kept.Y = double.IsFinite(image.Y) ? Math.Clamp(image.Y, 0, 1) : 0.5;
+                kept.Width = image.PlayWidth;
+                kept.Opacity = image.PlayOpacity;
+                kept.Rotation = ClipCanvas.Angle(image.Rotation);
+                clip.Images.Add(kept);
+            }
+            clip.Sounds = Sounds.Select(s => s.Clamped(total)).OfType<ClipMusic>().ToList();
         }
         // Music only where it plays: from 0 into the clip, from a place in its file, for some time.
-        if (Music is { Path.Length: > 0 } music && double.IsFinite(music.Offset) && double.IsFinite(music.From) && double.IsFinite(music.Length))
-        {
-            var kept = music.Clone();
-            kept.Offset = Math.Max(0, kept.Offset);
-            kept.From = Math.Clamp(kept.From, 0, Math.Max(0, kept.Length));
-            kept.Volume = kept.PlayVolume;
-            if (kept.PlayLength(clip.Length) >= ClipRange.MinLength)
-                clip.Music = kept;
-        }
+        clip.Music = Music?.Clamped(total);
         return clip;
     }
 
@@ -553,14 +620,10 @@ public sealed class ClipEdit
         var rest = Clone();
         rest.Parts = [];
         rest.Texts = [];
-        if (Music?.Clone() is { } music)
-        {
-            // The music keeps its place against the pictures: what has played of it is left out.
-            var played = Math.Max(0, seconds - music.Offset);
-            music.From += played;
-            music.Offset = Math.Max(0, music.Offset - Math.Max(0, seconds));
-            rest.Music = music;
-        }
+        rest.Images = [];
+        // The music keeps its place against the pictures: what has played of it is left out.
+        rest.Music = Music?.After(seconds);
+        rest.Sounds = Sounds.Where(s => s.Offset + s.PlayLength(double.MaxValue) > seconds).Select(s => s.After(seconds)).ToList();
         var skip = Math.Max(0, seconds);
         var starts = PartStarts();
         for (var i = 0; i < Parts.Count; i++)
@@ -581,6 +644,15 @@ public sealed class ClipEdit
             copy.Start = Math.Max(0, text.Start - skip);
             copy.Length = text.Start + text.Length - skip - copy.Start;
             rest.Texts.Add(copy);
+        }
+        foreach (var image in Images)
+        {
+            if (image.Start + image.Length <= skip)
+                continue;
+            var copy = image.Clone();
+            copy.Start = Math.Max(0, image.Start - skip);
+            copy.Length = image.Start + image.Length - skip - copy.Start;
+            rest.Images.Add(copy);
         }
         rest.FadeIn = Math.Max(0, Fade(FadeIn) - skip);
         return rest;

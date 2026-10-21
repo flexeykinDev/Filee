@@ -73,14 +73,20 @@ public sealed class ClipCutter
     /// </summary>
     public static ClipCutter? FromEdit(double duration, ClipEdit edit)
     {
-        if (edit.Texts.Count > 0 || edit.Aspect is not null || edit.LevelLoudness || edit.DuckMusic || edit.ReduceNoise || edit.LiftSpeech
-            || edit.Parts.Count == 0 || edit.Parts[0].Blank || edit.Parts[^1].Blank)
+        if (edit.Texts.Count > 0 || edit.Images.Count > 0 || edit.Aspect is not null || edit.LevelLoudness || edit.DuckMusic || edit.ReduceNoise
+            || edit.LiftSpeech || edit.Parts.Count == 0 || edit.Parts[0].Blank || edit.Parts[^1].Blank)
             return null;
+        // One sound on A2 is the quick cut's music; more, or on other tracks, only the editor plays.
+        var music = edit.Music;
+        if (edit.Sounds.Count > 1 || edit.Sounds.Count == 1 && (music is not null || edit.Sounds[0].Track != 0 || edit.Sounds[0].Play > 0))
+            return null;
+        music ??= edit.Sounds.FirstOrDefault();
         var pieces = new List<ClipPiece>();
         for (var i = 0; i < edit.Parts.Count; i++)
         {
             var part = edit.Parts[i];
-            if (part.Source is not null || part.Reverse || part.IsStill || part.IsRamp || part.PlayZoom != 1 || part.Transition != ClipTransitionKind.Cut)
+            if (part.Source is not null || part.Reverse || part.IsStill || part.IsRamp || part.PlayZoom != 1 || part.PlayRotation != 0
+                || part.FocusX != 0.5 || part.FocusY != 0.5 || part.Transition != ClipTransitionKind.Cut)
                 return null;
             if (part.Blank)
             {
@@ -109,7 +115,7 @@ public sealed class ClipCutter
             _pieces = pieces,
             _fadeIn = ClipEdit.Fade(edit.FadeIn),
             _fadeOut = ClipEdit.Fade(edit.FadeOut),
-            _music = edit.Music?.Clone(),
+            _music = music?.Clone(),
         };
         return cutter;
     }

@@ -37,11 +37,16 @@ internal static partial class MediaEncoding
     /// <param name="music">The clip's music is mixed in.</param>
     /// <param name="textFolder">Where the texts' files are written (null: the texts are left out).</param>
     /// <param name="sound">False for the pictures alone.</param>
+    /// <param name="layers">
+    /// The texts and pictures the editor drew (<see cref="ClipText.Rendered"/>, <see cref="ClipImage.Rendered"/>) are
+    /// laid over the video (false for the preview, which draws them itself).
+    /// </param>
     internal static ClipGraph EditorGraphOf(ClipEdit edit, Func<string?, EditorSource> sourceOf, int width, int height, string fps,
-        string pixelFormat = "yuv420p", bool video = true, bool audio = true, bool music = true, string? textFolder = null, bool sound = true)
+        string pixelFormat = "yuv420p", bool video = true, bool audio = true, bool music = true, string? textFolder = null, bool sound = true,
+        bool layers = false)
     {
-        var song = sound && music ? edit.Music : null;
-        var hasSound = sound && (audio || song is not null);
+        var songs = sound && music ? edit.AllSounds.ToList() : [];
+        var hasSound = sound && (audio || songs.Count > 0);
         if (!video && !hasSound)
             throw new ArgumentException("A clip's graph needs pictures or sound.", nameof(video));
         if (!edit.Parts.Any(p => !p.Blank))
@@ -115,7 +120,7 @@ internal static partial class MediaEncoding
                 }
                 var timed = Speed(graph, $"p{i}r", $"p{i}t", part, video: true);
                 graph.Append($"[{timed}]fps={fps}[p{i}f];");
-                var placed = Frame(graph, $"p{i}f", $"p{i}p", picture, edit.Fit, width, height);
+                var placed = Frame(graph, $"p{i}f", $"p{i}p", picture, edit.Fit, width, height, fps);
                 graph.Append($"[{placed}]format={pixelFormat},setsar=1,tpad=stop_mode=clone:stop_duration=1,trim=duration={length},setpts=PTS-STARTPTS,settb=AVTB[p{i}v];");
             }
 
@@ -207,7 +212,11 @@ internal static partial class MediaEncoding
         if (video)
         {
             var joined = Join("v");
-            var texts = textFolder is null ? "" : Texts(edit.Texts, width, height, textFolder);
+            if (layers)
+                joined = Layers(graph, inputs, edit, joined, width, height, fps, total);
+            // Texts the editor didn't draw (an edit made elsewhere) are drawn by FFmpeg.
+            var drawn = edit.Texts.Where(t => !layers || t.Rendered is null).ToList();
+            var texts = textFolder is null ? "" : Texts(drawn, width, height, textFolder);
             outputs.Add($"[{joined}]{texts}{Fades("fade", fadeInAll, fadeOutAll, total)}[v]");
         }
         if (hasSound)
@@ -220,21 +229,29 @@ internal static partial class MediaEncoding
                 clean.Add("acompressor=threshold=0.089:ratio=3:attack=5:release=150:makeup=2");
             outputs.Add($"[{voice}]{(clean.Count > 0 ? string.Join(',', clean) : "anull")}[voice]");
             var mixed = "voice";
-            if (song is not null)
+            if (songs.Count > 0)
             {
-                var length = song.PlayLength(total);
-                var fade = song.Fade ? Math.Min(ClipMusic.FadeSeconds, length / 2) : 0;
-                var delay = (long)Math.Round(song.Offset * 1000);
-                var musicInput = inputs.Count(a => a == "-i");
-                inputs.AddRange(["-ss", ClipRange.Ffmpeg(song.From), "-i", song.Path]);
-                var chain = $"[{musicInput}:a:0]atrim=duration={Seconds(length)},asetpts=PTS-STARTPTS";
-                if (song.PlayVolume != 1)
-                    chain += $",volume={Seconds(song.PlayVolume)}";
-                if (fade > 0)
-                    chain += "," + Fades("afade", fade, fade, length);
-                if (delay > 0)
-                    chain += $",adelay={delay}:all=1";
-                outputs.Add($"{chain},{ClipAudioFormat}[m]");
+                // Each sound: as long as it plays, at its volume, faded at its ends, delayed to its place; then all together.
+                for (var k = 0; k < songs.Count; k++)
+                {
+                    var song = songs[k];
+                    var length = song.PlayLength(total);
+                    var fade = song.Fade ? Math.Min(ClipMusic.FadeSeconds, length / 2) : 0;
+                    var delay = (long)Math.Round(song.Offset * 1000);
+                    var musicInput = inputs.Count(a => a == "-i");
+                    inputs.AddRange(["-ss", ClipRange.Ffmpeg(song.From), "-i", song.Path]);
+                    var chain = $"[{musicInput}:a:0]atrim=duration={Seconds(length)},asetpts=PTS-STARTPTS";
+                    if (song.PlayVolume != 1)
+                        chain += $",volume={Seconds(song.PlayVolume)}";
+                    if (fade > 0)
+                        chain += "," + Fades("afade", fade, fade, length);
+                    if (delay > 0)
+                        chain += $",adelay={delay}:all=1";
+                    outputs.Add($"{chain},{ClipAudioFormat}[m{k}]");
+                }
+                outputs.Add(songs.Count == 1
+                    ? "[m0]anull[m]"
+                    : string.Concat(Enumerable.Range(0, songs.Count).Select(k => $"[m{k}]")) + $"amix=inputs={songs.Count}:duration=longest:dropout_transition=0:normalize=0[m]");
                 if (edit.DuckMusic)
                 {
                     // The music gives way while the video's own sound plays.
@@ -256,8 +273,9 @@ internal static partial class MediaEncoding
     /// <summary>What the frame shows of a part's picture: the crop and scale that read it, and where it goes.</summary>
     /// <param name="Scale">Crop (to what is shown) and scale (to its size in the frame).</param>
     /// <param name="Width">Its size in the frame.</param>
-    /// <param name="X">Where it goes in the frame.</param>
-    internal readonly record struct EditorPicture(string Scale, int Width, int Height, int X, int Y);
+    /// <param name="X">Where it goes in the frame (its top-left corner; unturned).</param>
+    /// <param name="Rotation">Degrees it is turned clockwise about its middle (0: not turned, then nothing is cut off it).</param>
+    internal readonly record struct EditorPicture(string Scale, int Width, int Height, int X, int Y, double Rotation = 0);
 
     /// <summary>The crop and scale of <paramref name="part"/>'s picture for a frame of <paramref name="width"/> × <paramref name="height"/>.</summary>
     internal static EditorPicture Picture(EditorSource source, ClipPart part, ClipFit fit, int width, int height)
@@ -265,15 +283,28 @@ internal static partial class MediaEncoding
         var (sourceWidth, sourceHeight) = source.Size;
         var place = ClipCanvas.Place(sourceWidth, sourceHeight, width, height, fit, part.PlayZoom, part.FocusX, part.FocusY);
         var scale = place.Width / sourceWidth;
-        // What of the placed picture is inside the frame, and that part of the video.
-        var shownX = Math.Max(0, -place.X);
-        var shownY = Math.Max(0, -place.Y);
-        var shownWidth = Math.Min(place.Width - shownX, width);
-        var shownHeight = Math.Min(place.Height - shownY, height);
+        if (part.PlayRotation != 0)
+        {
+            // Turned: scaled whole (corners may come into the frame), turned and laid on at its middle later.
+            var turnedWidth = Even(place.Width);
+            var turnedHeight = Even(place.Height);
+            return new EditorPicture($"scale={turnedWidth}:{turnedHeight}:flags=bicubic,setsar=1", turnedWidth, turnedHeight,
+                (int)Math.Round(place.X + place.Width / 2 - turnedWidth / 2.0), (int)Math.Round(place.Y + place.Height / 2 - turnedHeight / 2.0),
+                part.PlayRotation);
+        }
+        // What of the placed picture is inside the frame (it may stick out on any side), and that part of the video.
+        var visibleLeft = Math.Clamp(place.X, 0, width);
+        var visibleTop = Math.Clamp(place.Y, 0, height);
+        var visibleRight = Math.Clamp(place.X + place.Width, 0, width);
+        var visibleBottom = Math.Clamp(place.Y + place.Height, 0, height);
+        var shownX = visibleLeft - place.X;
+        var shownY = visibleTop - place.Y;
+        var shownWidth = Math.Max(2, visibleRight - visibleLeft);
+        var shownHeight = Math.Max(2, visibleBottom - visibleTop);
         var outWidth = Math.Min(Even(shownWidth), width);
         var outHeight = Math.Min(Even(shownHeight), height);
-        var x = Math.Clamp((int)Math.Round(Math.Max(0, place.X)), 0, width - outWidth);
-        var y = Math.Clamp((int)Math.Round(Math.Max(0, place.Y)), 0, height - outHeight);
+        var x = Math.Clamp((int)Math.Round(visibleLeft), 0, width - outWidth);
+        var y = Math.Clamp((int)Math.Round(visibleTop), 0, height - outHeight);
         var filters = new List<string>();
         if (shownWidth < place.Width - 0.5 || shownHeight < place.Height - 0.5)
         {
@@ -325,8 +356,10 @@ internal static partial class MediaEncoding
     }
 
     /// <summary>The scaled picture put into the frame: on black, or on a blurred copy of itself.</summary>
-    private static string Frame(StringBuilder graph, string from, string to, EditorPicture picture, ClipFit fit, int width, int height)
+    private static string Frame(StringBuilder graph, string from, string to, EditorPicture picture, ClipFit fit, int width, int height, string fps)
     {
+        if (picture.Rotation != 0)
+            return Turned(graph, from, to, picture, fit, width, height, fps);
         if (picture.Width == width && picture.Height == height)
             return from;
         if (fit != ClipFit.Blur)
@@ -342,6 +375,57 @@ internal static partial class MediaEncoding
         graph.Append($"[{to}b]scale={Even(cover.Width)}:{Even(cover.Height)},crop={smallWidth}:{smallHeight},boxblur=6:2,scale={width}:{height},setsar=1[{to}g];");
         graph.Append($"[{to}g][{to}f]overlay={picture.X}:{picture.Y}:shortest=1[{to}];");
         return to;
+    }
+
+    /// <summary>A turned picture laid on black or on a blurred copy of itself, its middle where it was placed.</summary>
+    private static string Turned(StringBuilder graph, string from, string to, EditorPicture picture, ClipFit fit, int width, int height, string fps)
+    {
+        var radians = Seconds(Math.Abs(picture.Rotation) * Math.PI / 180);
+        var angle = picture.Rotation < 0 ? $"-{radians}" : radians;
+        var middleX = Seconds(picture.X + picture.Width / 2.0);
+        var middleY = Seconds(picture.Y + picture.Height / 2.0);
+        if (fit == ClipFit.Blur)
+        {
+            var smallWidth = Even(width / 8.0);
+            var smallHeight = Even(height / 8.0);
+            var cover = ClipCanvas.Place(picture.Width, picture.Height, smallWidth, smallHeight, ClipFit.Crop);
+            graph.Append($"[{from}]split=2[{to}f][{to}b];");
+            graph.Append($"[{to}b]scale={Even(cover.Width)}:{Even(cover.Height)},crop={smallWidth}:{smallHeight},boxblur=6:2,scale={width}:{height},setsar=1[{to}g];");
+        }
+        else
+        {
+            graph.Append($"[{from}]null[{to}f];");
+            graph.Append($"color=c=black:s={width}x{height}:r={fps},setsar=1[{to}g];");
+        }
+        graph.Append($"[{to}f]format=rgba,rotate={angle}:ow=rotw({radians}):oh=roth({radians}):c=none[{to}r];");
+        graph.Append($"[{to}g][{to}r]overlay=x={middleX}-overlay_w/2:y={middleY}-overlay_h/2:shortest=1[{to}];");
+        return to;
+    }
+
+    /// <summary>
+    /// The texts and pictures the editor drew, each a transparent picture of the frame's size, laid over
+    /// <paramref name="from"/> while they show (texts fading in and out). Returns the label of the result.
+    /// </summary>
+    private static string Layers(StringBuilder graph, List<string> inputs, ClipEdit edit, string from, int width, int height, string fps, double total)
+    {
+        var layers = edit.Images.Where(i => i.Rendered is not null).Select(i => (Path: i.Rendered!, i.Start, i.Length, Fade: 0.0))
+            .Concat(edit.Texts.Where(t => t.Rendered is not null).Select(t => (Path: t.Rendered!, t.Start, t.Length, Fade: Math.Min(ClipText.FadeSeconds, t.Length / 3))))
+            .ToList();
+        var current = from;
+        for (var n = 0; n < layers.Count; n++)
+        {
+            var (path, start, length, fade) = layers[n];
+            var end = start + length;
+            var index = inputs.Count(a => a == "-i");
+            inputs.AddRange(["-loop", "1", "-framerate", fps, "-t", Seconds(total + 1), "-i", path]);
+            var fades = fade > 0
+                ? $",fade=t=in:st={Seconds(start)}:d={Seconds(fade)}:alpha=1,fade=t=out:st={Seconds(end - fade)}:d={Seconds(fade)}:alpha=1"
+                : "";
+            graph.Append($"[{index}:v]scale={width}:{height},format=rgba,setsar=1{fades}[l{n}];");
+            graph.Append($"[{current}][l{n}]overlay=0:0:enable='between(t,{Seconds(start)},{Seconds(end)})':eof_action=pass[lv{n}];");
+            current = $"lv{n}";
+        }
+        return current;
     }
 
     /// <summary>The texts drawn over the picture (drawtext, each in its own file), as filters ending in a comma.</summary>

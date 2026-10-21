@@ -207,6 +207,73 @@ public class EditorClipTests(EngineFixture fx) : IClassFixture<EngineFixture>
     }
 
     [Fact]
+    public async Task Turned_moved_pictures_layers_and_several_sounds_are_written()
+    {
+        SkipUnlessInstalled();
+        var folder = fx.NewFolder();
+        var wide = await MakeVideoAsync(folder, "wide.mp4");
+        var logo = Path.Combine(folder, "logo.png");
+        var made = await ProcessRunner.RunAsync(Tools!.Value.Ffmpeg,
+            ["-hide_banner", "-nostdin", "-v", "error", "-y", "-f", "lavfi", "-i", "color=c=red@0.5:s=360x640,format=rgba", "-frames:v", "1", logo],
+            TimeSpan.FromMinutes(1), CancellationToken.None);
+        Assert.True(made.ExitCode == 0, made.StandardError);
+        var one = Path.Combine(folder, "one.wav");
+        var two = Path.Combine(folder, "two.wav");
+        foreach (var (file, tone) in new[] { (one, 330), (two, 550) })
+        {
+            var sound = await ProcessRunner.RunAsync(Tools.Value.Ffmpeg,
+                ["-hide_banner", "-nostdin", "-v", "error", "-y", "-f", "lavfi", "-i", $"sine=frequency={tone}:duration=3", "-ac", "2", file],
+                TimeSpan.FromMinutes(1), CancellationToken.None);
+            Assert.True(sound.ExitCode == 0, sound.StandardError);
+        }
+        var edit = new ClipEdit
+        {
+            Editor = true,
+            Aspect = "9:16",
+            Resolution = 360,
+            Fit = ClipFit.Blur,
+            Parts =
+            [
+                new() { Start = 0, End = 2, Rotation = 30, Zoom = 0.8 },
+                new() { Start = 2, End = 4, FocusX = 0.2, Zoom = 0.6, Reverse = true },
+            ],
+            Images = [new() { Path = logo, Rendered = logo, Start = 0.5, Length = 2 }],
+            Texts = [new() { Text = "drawn already", Rendered = logo, Start = 1, Length = 2 }],
+            Sounds =
+            [
+                new() { Path = one, Length = 3, Offset = 0 },
+                new() { Path = two, Length = 3, Offset = 1, Track = 1, Play = 1.5 },
+            ],
+        };
+
+        var output = Assert.Single(await WriteAsync(wide, edit));
+
+        var probed = await ProbeAsync(output);
+        Assert.Equal((360, 640), (probed.Width, probed.Height));
+        Assert.Equal(("h264", "aac"), (probed.VideoCodec, probed.AudioCodec));
+        Assert.InRange(probed.Duration, 3.85, 4.15);
+    }
+
+    [Fact]
+    public void Layers_and_turned_parts_in_the_graph()
+    {
+        var edit = new ClipEdit
+        {
+            Editor = true,
+            Parts = [new() { Start = 0, End = 5, Rotation = -90 }],
+            Texts = [new() { Text = "Hi", Rendered = "hi.png", Start = 1, Length = 2 }],
+            Sounds = [new() { Path = "a.mp3", Length = 9 }, new() { Path = "b.mp3", Length = 9, Track = 1 }],
+        }.Clamped(_ => 60);
+        var args = MediaEncoding.EditorArguments(edit, SourceOf, "out.mp4", "mp4", new MediaOptions(), null, null, Path.GetTempPath());
+        var graph = After(args, "-filter_complex");
+        Assert.Contains("rotate=-1.571", graph);
+        Assert.Contains("overlay=0:0:enable='between(t,1,3)'", graph);
+        Assert.DoesNotContain("drawtext", graph); // the editor drew the text
+        Assert.Contains("amix=inputs=2:duration=longest", graph);
+        Assert.Contains("hi.png", args);
+    }
+
+    [Fact]
     public async Task Whole_videos_of_one_format_are_joined_by_copying()
     {
         SkipUnlessInstalled();

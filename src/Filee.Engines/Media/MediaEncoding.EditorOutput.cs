@@ -73,7 +73,7 @@ internal static partial class MediaEncoding
                 fps = GifFps.ToString(CultureInfo.InvariantCulture);
         }
         var sound = !gif && !options.RemoveAudio;
-        var graph = EditorGraphOf(edit, sourceOf, width, height, fps, "yuv420p", audio: sound, music: sound, textFolder: workFolder, sound: sound);
+        var graph = EditorGraphOf(edit, sourceOf, width, height, fps, "yuv420p", audio: sound, music: sound, textFolder: workFolder, sound: sound, layers: true);
         var filter = graph.Filter;
         List<string> args = [.. Common];
 
@@ -192,7 +192,7 @@ internal static partial class MediaEncoding
     /// </summary>
     internal static bool CanJoinByCopy(ClipEdit edit, Func<string?, EditorSource> sourceOf, string target, MediaOptions options)
     {
-        if (edit.Parts.Count < 2 || edit.Texts.Count > 0 || edit.Music is not null || edit.FadeIn > 0 || edit.FadeOut > 0
+        if (edit.Parts.Count < 2 || edit.Texts.Count > 0 || edit.Images.Count > 0 || edit.AllSounds.Any() || edit.FadeIn > 0 || edit.FadeOut > 0
             || edit.Aspect is not null || edit.Resolution > 0 || edit.Fps > 0 || edit.MaxMegabytes > 0 || edit.Separate
             || edit.LevelLoudness || edit.ReduceNoise || edit.LiftSpeech || options.RemoveAudio)
             return false;
@@ -201,7 +201,7 @@ internal static partial class MediaEncoding
         for (var i = 0; i < edit.Parts.Count; i++)
         {
             var part = edit.Parts[i];
-            if (!part.IsPlain || part.Transition != ClipTransitionKind.Cut)
+            if (!part.IsPlain || part.Transition != ClipTransitionKind.Cut || part.FocusX != 0.5 || part.FocusY != 0.5)
                 return false;
             var source = sourceOf(part.Source);
             var duration = source.Info.Duration?.TotalSeconds ?? 0;

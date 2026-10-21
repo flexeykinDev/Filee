@@ -31,6 +31,13 @@ public sealed class ClipProject
     {
         _edit = edit.Clone();
         _edit.Editor = true;
+        // The editor keeps every sound on its tracks: the quick cut's music becomes the first.
+        if (_edit.Music is { } music)
+        {
+            music.Track = 0;
+            _edit.Sounds.Insert(0, music);
+            _edit.Music = null;
+        }
         _durationOf = durationOf;
     }
 
@@ -42,7 +49,11 @@ public sealed class ClipProject
 
     public IReadOnlyList<ClipPart> Parts => _edit.Parts;
     public IReadOnlyList<ClipText> Texts => _edit.Texts;
-    public ClipMusic? Music => _edit.Music;
+    public IReadOnlyList<ClipImage> Images => _edit.Images;
+    public IReadOnlyList<ClipMusic> Sounds => _edit.Sounds;
+
+    /// <summary>The sound tracks in use (A2 is 0): at least one.</summary>
+    public int SoundTracks => Math.Max(1, _edit.Sounds.Count == 0 ? 1 : _edit.Sounds.Max(s => s.Track) + 1);
 
     /// <summary>How long the clip plays, in seconds.</summary>
     public double Length => _edit.Length;
@@ -363,9 +374,9 @@ public sealed class ClipProject
         copy.Length = double.IsFinite(copy.Length) ? Math.Max(ClipRange.MinLength, copy.Length) : 3;
         copy.X = double.IsFinite(copy.X) ? Math.Clamp(copy.X, 0, 1) : 0.5;
         copy.Y = double.IsFinite(copy.Y) ? Math.Clamp(copy.Y, 0, 1) : 0.5;
-        var old = _edit.Texts[index];
-        if ((old.Text, old.Style, old.Start, old.Length, old.X, old.Y, old.Size, old.Color)
-            == (copy.Text, copy.Style, copy.Start, copy.Length, copy.X, copy.Y, copy.Size, copy.Color))
+        copy.Opacity = copy.PlayOpacity;
+        copy.Rotation = ClipCanvas.Angle(copy.Rotation);
+        if (Same(_edit.Texts[index], copy))
             return;
         Change(() => _edit.Texts[index] = copy, join: join);
     }
@@ -380,24 +391,114 @@ public sealed class ClipProject
         return true;
     }
 
-    // ───────────────────────── Music ─────────────────────────
+    // ───────────────────────── Pictures over the video ─────────────────────────
 
-    /// <summary>Music under the clip (null takes it away).</summary>
-    public void SetMusic(ClipMusic? music) => Change(() => _edit.Music = music?.Clone());
-
-    /// <summary>Changes the music (a drag is one undo step with <paramref name="join"/>).</summary>
-    public void ChangeMusic(Action<ClipMusic> change, string? join = null)
+    /// <summary>Adds a picture over the video. Returns its index.</summary>
+    public int AddImage(ClipImage image)
     {
-        if (_edit.Music is null)
+        var copy = image.Clone();
+        copy.Start = Math.Clamp(double.IsFinite(image.Start) ? image.Start : 0, 0, Math.Max(0, Length - ClipRange.MinLength));
+        copy.Length = Math.Clamp(double.IsFinite(image.Length) ? image.Length : 5, ClipRange.MinLength, Math.Max(ClipRange.MinLength, Length - copy.Start));
+        Change(() => _edit.Images.Add(copy));
+        return _edit.Images.Count - 1;
+    }
+
+    /// <summary>Changes picture <paramref name="index"/> (a drag is one undo step with <paramref name="join"/>).</summary>
+    public void ChangeImage(int index, Action<ClipImage> change, string? join = null)
+    {
+        if (index < 0 || index >= _edit.Images.Count)
             return;
-        var copy = _edit.Music.Clone();
+        var copy = _edit.Images[index].Clone();
+        change(copy);
+        copy.Start = double.IsFinite(copy.Start) ? Math.Clamp(copy.Start, 0, Math.Max(0, Length - ClipRange.MinLength)) : 0;
+        copy.Length = double.IsFinite(copy.Length) ? Math.Max(ClipRange.MinLength, copy.Length) : 5;
+        copy.X = double.IsFinite(copy.X) ? Math.Clamp(copy.X, 0, 1) : 0.5;
+        copy.Y = double.IsFinite(copy.Y) ? Math.Clamp(copy.Y, 0, 1) : 0.5;
+        copy.Width = copy.PlayWidth;
+        copy.Opacity = copy.PlayOpacity;
+        copy.Rotation = ClipCanvas.Angle(copy.Rotation);
+        if (Same(_edit.Images[index], copy))
+            return;
+        Change(() => _edit.Images[index] = copy, join: join);
+    }
+
+    /// <summary>Takes the pictures <paramref name="indices"/> away.</summary>
+    public bool RemoveImages(IReadOnlyCollection<int> indices)
+    {
+        var chosen = indices.Where(i => i >= 0 && i < _edit.Images.Count).ToHashSet();
+        if (chosen.Count == 0)
+            return false;
+        Change(() => _edit.Images = _edit.Images.Where((_, i) => !chosen.Contains(i)).ToList());
+        return true;
+    }
+
+    // ───────────────────────── Sounds ─────────────────────────
+
+    /// <summary>
+    /// Adds a sound from a file of <paramref name="length"/> seconds on <paramref name="track"/> (null: A2): at
+    /// <paramref name="offset"/> seconds into the clip, or right after the last sound on that track. Returns its index.
+    /// </summary>
+    public int AddSound(string path, double length, int? track = null, double? offset = null)
+    {
+        var on = Math.Max(0, track ?? 0);
+        var after = _edit.Sounds.Where(s => s.Track == on).Select(s => s.Offset + s.PlayLength(Length)).DefaultIfEmpty(0).Max();
+        var sound = new ClipMusic
+        {
+            Path = path,
+            Length = Math.Max(ClipRange.MinLength, length),
+            Track = on,
+            Offset = Math.Clamp(offset ?? after, 0, Math.Max(0, Length - ClipRange.MinLength)),
+        };
+        Change(() => _edit.Sounds.Add(sound));
+        return _edit.Sounds.Count - 1;
+    }
+
+    /// <summary>Changes sound <paramref name="index"/> (a drag is one undo step with <paramref name="join"/>).</summary>
+    public void ChangeSound(int index, Action<ClipMusic> change, string? join = null)
+    {
+        if (index < 0 || index >= _edit.Sounds.Count)
+            return;
+        var copy = _edit.Sounds[index].Clone();
         change(copy);
         copy.Offset = double.IsFinite(copy.Offset) ? Math.Clamp(copy.Offset, 0, Math.Max(0, Length - ClipRange.MinLength)) : 0;
         copy.Volume = double.IsFinite(copy.Volume) ? Math.Clamp(Math.Round(copy.Volume, 2), 0, 2) : ClipMusic.DefaultVolume;
-        var old = _edit.Music;
-        if ((old.Offset, old.Volume, old.Fade, old.From) == (copy.Offset, copy.Volume, copy.Fade, copy.From))
+        copy.From = double.IsFinite(copy.From) ? Math.Clamp(copy.From, 0, Math.Max(0, copy.Length - ClipRange.MinLength)) : 0;
+        copy.Play = copy.Play > 0 && double.IsFinite(copy.Play) ? Math.Max(ClipRange.MinLength, copy.Play) : 0;
+        copy.Track = Math.Clamp(copy.Track, 0, 7);
+        if (Same(_edit.Sounds[index], copy))
             return;
-        Change(() => _edit.Music = copy, join: join);
+        Change(() => _edit.Sounds[index] = copy, join: join);
+    }
+
+    /// <summary>Takes the sounds <paramref name="indices"/> away.</summary>
+    public bool RemoveSounds(IReadOnlyCollection<int> indices)
+    {
+        var chosen = indices.Where(i => i >= 0 && i < _edit.Sounds.Count).ToHashSet();
+        if (chosen.Count == 0)
+            return false;
+        Change(() => _edit.Sounds = _edit.Sounds.Where((_, i) => !chosen.Contains(i)).ToList());
+        return true;
+    }
+
+    /// <summary>
+    /// Takes everything of the file <paramref name="path"/> out (a video's parts, its sounds, its pictures), as one undo
+    /// step; <paramref name="source"/> is how the parts name it (null: the window's video). False when nothing of the
+    /// video would be left to play.
+    /// </summary>
+    public bool RemoveFile(string path, string? source)
+    {
+        var parts = _edit.Parts.Where(p => p.Blank || !string.Equals(p.Source, source, StringComparison.OrdinalIgnoreCase)).ToList();
+        if (!parts.Any(p => !p.Blank))
+            return false;
+        Change(() =>
+        {
+            _edit.Parts = parts;
+            while (_edit.Parts.Count > 0 && _edit.Parts[0].Blank)
+                _edit.Parts.RemoveAt(0);
+            _edit.Sounds = _edit.Sounds.Where(s => !string.Equals(s.Path, path, StringComparison.OrdinalIgnoreCase)).ToList();
+            _edit.Images = _edit.Images.Where(i => !string.Equals(i.Path, path, StringComparison.OrdinalIgnoreCase)).ToList();
+        });
+        return true;
     }
 
     // ───────────────────────── The whole clip ─────────────────────────
@@ -418,6 +519,8 @@ public sealed class ClipProject
         {
             copy.Parts = _edit.Parts;
             copy.Texts = _edit.Texts;
+            copy.Images = _edit.Images;
+            copy.Sounds = _edit.Sounds;
             copy.Music = _edit.Music;
             _edit = copy;
         }, join: join);
@@ -472,6 +575,7 @@ public sealed class ClipProject
         part.SpeedEnd = part.SpeedEnd > 0 && double.IsFinite(part.SpeedEnd) && Math.Abs(part.PlaySpeedEnd - part.PlaySpeed) > 1e-6
             ? part.PlaySpeedEnd : 0;
         part.Zoom = part.PlayZoom;
+        part.Rotation = part.PlayRotation;
         part.FocusX = double.IsFinite(part.FocusX) ? Math.Clamp(part.FocusX, 0, 1) : 0.5;
         part.FocusY = double.IsFinite(part.FocusY) ? Math.Clamp(part.FocusY, 0, 1) : 0.5;
         part.TransitionSeconds = ClipEdit.TransitionLength(part);
@@ -484,16 +588,26 @@ public sealed class ClipProject
 
     private static bool Same(ClipPart a, ClipPart b) =>
         (a.Start, a.End, a.Blank, a.Volume, a.Muted, a.Speed, a.Source, a.Reverse, a.Hold, a.SpeedEnd, a.Transition, a.TransitionSeconds, a.Zoom, a.FocusX, a.FocusY)
-        == (b.Start, b.End, b.Blank, b.Volume, b.Muted, b.Speed, b.Source, b.Reverse, b.Hold, b.SpeedEnd, b.Transition, b.TransitionSeconds, b.Zoom, b.FocusX, b.FocusY);
+        == (b.Start, b.End, b.Blank, b.Volume, b.Muted, b.Speed, b.Source, b.Reverse, b.Hold, b.SpeedEnd, b.Transition, b.TransitionSeconds, b.Zoom, b.FocusX, b.FocusY)
+        && a.Rotation == b.Rotation;
+
+    private static bool Same(ClipText a, ClipText b) =>
+        (a.Text, a.Style, a.Start, a.Length, a.X, a.Y, a.Size, a.Color, a.Font, a.Opacity, a.Rotation)
+        == (b.Text, b.Style, b.Start, b.Length, b.X, b.Y, b.Size, b.Color, b.Font, b.Opacity, b.Rotation);
+
+    private static bool Same(ClipImage a, ClipImage b) =>
+        (a.Path, a.Start, a.Length, a.X, a.Y, a.Width, a.Rotation, a.Opacity) == (b.Path, b.Start, b.Length, b.X, b.Y, b.Width, b.Rotation, b.Opacity);
+
+    private static bool Same(ClipMusic? a, ClipMusic? b) =>
+        a is null ? b is null
+        : b is not null && (a.Path, a.Offset, a.Volume, a.From, a.Fade, a.Track, a.Play, a.Length) == (b.Path, b.Offset, b.Volume, b.From, b.Fade, b.Track, b.Play, b.Length);
 
     private static bool Same(ClipEdit a, ClipEdit b) =>
         a.Parts.Count == b.Parts.Count && a.Parts.Zip(b.Parts).All(p => Same(p.First, p.Second))
-        && a.Texts.Count == b.Texts.Count
-        && a.Texts.Zip(b.Texts).All(t => (t.First.Text, t.First.Style, t.First.Start, t.First.Length, t.First.X, t.First.Y, t.First.Size, t.First.Color)
-            == (t.Second.Text, t.Second.Style, t.Second.Start, t.Second.Length, t.Second.X, t.Second.Y, t.Second.Size, t.Second.Color))
-        && (a.Music is null ? b.Music is null
-            : b.Music is not null && (a.Music.Path, a.Music.Offset, a.Music.Volume, a.Music.From, a.Music.Fade)
-                == (b.Music.Path, b.Music.Offset, b.Music.Volume, b.Music.From, b.Music.Fade))
+        && a.Texts.Count == b.Texts.Count && a.Texts.Zip(b.Texts).All(t => Same(t.First, t.Second))
+        && a.Images.Count == b.Images.Count && a.Images.Zip(b.Images).All(i => Same(i.First, i.Second))
+        && a.Sounds.Count == b.Sounds.Count && a.Sounds.Zip(b.Sounds).All(s => Same(s.First, s.Second))
+        && Same(a.Music, b.Music)
         && (a.FadeIn, a.FadeOut, a.Aspect, a.Fit, a.Resolution, a.Fps, a.MaxMegabytes, a.Separate, a.LevelLoudness, a.DuckMusic, a.ReduceNoise, a.LiftSpeech)
             == (b.FadeIn, b.FadeOut, b.Aspect, b.Fit, b.Resolution, b.Fps, b.MaxMegabytes, b.Separate, b.LevelLoudness, b.DuckMusic, b.ReduceNoise, b.LiftSpeech);
 

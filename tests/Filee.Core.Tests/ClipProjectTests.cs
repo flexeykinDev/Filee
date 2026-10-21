@@ -298,25 +298,100 @@ public class ClipProjectTests
         Assert.Equal((expectedWidth, expectedHeight), ClipCanvas.Size(aspect, resolution, width, height));
 
     [Fact]
-    public void A_picture_is_fitted_cropped_or_zoomed_where_its_focus_says()
+    public void A_picture_is_fitted_cropped_zoomed_and_moved_freely()
     {
         // 16:9 into 9:16: fitted it is as wide as the frame, in the middle.
         var fit = ClipCanvas.Place(1920, 1080, 1080, 1920, ClipFit.Bars);
         Near(1080, fit.Width);
         Near((1920 - 607.5) / 2, fit.Y);
-        // Cropped it fills the height; focus 0 shows its left edge, 1 its right edge.
+        // Cropped it fills the height, its middle where the focus puts it.
+        var middle = ClipCanvas.Place(1920, 1080, 1080, 1920, ClipFit.Crop);
+        Near(1920, middle.Height);
+        Near((1080 - middle.Width) / 2, middle.X);
         var left = ClipCanvas.Place(1920, 1080, 1080, 1920, ClipFit.Crop, focusX: 0);
-        Near(1920, left.Height);
-        Near(0, left.X);
-        var right = ClipCanvas.Place(1920, 1080, 1080, 1920, ClipFit.Crop, focusX: 1);
-        Near(1080 - right.Width, right.X);
-        // Twice as close in the same shape: twice as large, its middle shown.
-        var zoom = ClipCanvas.Place(1920, 1080, 1920, 1080, ClipFit.Bars, zoom: 2);
-        Assert.Equal(new ClipPlacement(3840, 2160, -960, -540), zoom);
-        // A drag moves the focus the other way, as far as the picture goes.
-        Assert.Equal((0.25, 0.5), ClipCanvas.Drag(zoom, 1920, 1080, 0.5, 0.5, 480, 0));
-        Assert.Equal((0.0, 0.5), ClipCanvas.Drag(zoom, 1920, 1080, 0.5, 0.5, 5000, 0));
+        Near(-left.Width / 2, left.X);
+        // Twice as large in the same shape, or half as large in the middle.
+        Assert.Equal(new ClipPlacement(3840, 2160, -960, -540), ClipCanvas.Place(1920, 1080, 1920, 1080, ClipFit.Bars, zoom: 2));
+        Assert.Equal(new ClipPlacement(960, 540, 480, 270), ClipCanvas.Place(1920, 1080, 1920, 1080, ClipFit.Bars, zoom: 0.5));
+        // A drag moves the middle with the pointer, kept inside the frame.
+        Assert.Equal((0.75, 0.5), ClipCanvas.Drag(1920, 1080, 0.5, 0.5, 480, 0));
+        Assert.Equal((1.0, 0.5), ClipCanvas.Drag(1920, 1080, 0.5, 0.5, 5000, 0));
         Assert.Equal(((byte)255, (byte)212, (byte)59), ClipCanvas.ParseColor("#FFD43B"));
         Assert.Null(ClipCanvas.ParseColor("red"));
+        // Angles and turned boxes.
+        Assert.Equal(-90, ClipCanvas.Angle(270));
+        Assert.Equal(180, ClipCanvas.Angle(-180));
+        var (w, h) = ClipCanvas.Turned(100, 50, 90);
+        Near(50, w, 1e-9);
+        Near(100, h, 1e-9);
+    }
+
+    [Fact]
+    public void Sounds_go_in_a_row_on_their_tracks_and_change()
+    {
+        var project = Project();
+        Assert.Equal(0, project.AddSound(@"D:\Music\one.mp3", 30));
+        Assert.Equal(1, project.AddSound(@"D:\Music\two.mp3", 20)); // right after the first, on A2
+        Assert.Equal(30, project.Sounds[1].Offset);
+        Assert.Equal(2, project.AddSound(@"D:\Music\three.mp3", 10, track: 1, offset: 5));
+        Assert.Equal(2, project.SoundTracks);
+        project.ChangeSound(1, s =>
+        {
+            s.From = 4;
+            s.Play = 8;
+            s.Volume = 1.5;
+        });
+        Assert.Equal(8, project.Sounds[1].PlayLength(project.Length));
+        var rest = project.Edit.From(33);
+        // The first and the one on A3 have played; the second plays on from where it is.
+        var left = Assert.Single(rest.Sounds);
+        Assert.Equal((7.0, 5.0, 0.0), (left.From, left.Play, left.Offset));
+        Assert.True(project.RemoveSounds([0, 2]));
+        Assert.Single(project.Sounds);
+        project.Undo();
+        Assert.Equal(3, project.Sounds.Count);
+    }
+
+    [Fact]
+    public void The_quick_cuts_music_becomes_the_first_sound()
+    {
+        var edit = ClipEdit.Of(new ClipRange(0, 10));
+        edit.Music = new ClipMusic { Path = "song.mp3", Length = 40, Offset = 2 };
+        var project = new ClipProject(edit, _ => 100);
+        Assert.Null(project.Edit.Music);
+        Assert.Equal(("song.mp3", 0, 2.0), (project.Sounds[0].Path, project.Sounds[0].Track, project.Sounds[0].Offset));
+        // Back to a quick cut it is the music again.
+        var cutter = ClipCutter.FromEdit(100, project.ToEdit());
+        Assert.Equal("song.mp3", cutter!.Music!.Path);
+    }
+
+    [Fact]
+    public void Pictures_over_the_video_and_turned_parts()
+    {
+        var project = Project();
+        var index = project.AddImage(new ClipImage { Path = "logo.png", Start = 1, Length = 4 });
+        project.ChangeImage(index, i =>
+        {
+            i.Width = 9;
+            i.Rotation = 450;
+            i.Opacity = 0;
+        });
+        var image = project.Images[index];
+        Assert.Equal((ClipImage.MaxWidth, 90.0, 0.05), (image.Width, image.Rotation, image.Opacity));
+        project.ChangePart(0, p =>
+        {
+            p.Rotation = -90;
+            p.Zoom = 0.5;
+        });
+        Assert.Equal((-90.0, 0.5), (project.Parts[0].Rotation, project.Parts[0].Zoom));
+        Assert.False(project.Parts[0].IsPlain);
+        Assert.Null(ClipCutter.FromEdit(100, project.ToEdit()));
+        var clamped = project.ToEdit().Clamped(_ => 100);
+        Assert.Single(clamped.Images);
+        Assert.Equal(-90, clamped.Parts[0].Rotation);
+        // A file taken out of the project takes its parts and pictures along.
+        Assert.True(project.RemoveFile(Second, Second));
+        Assert.Single(project.Parts);
+        Assert.False(project.RemoveFile("whatever", null)); // nothing would be left to play
     }
 }
