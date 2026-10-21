@@ -70,7 +70,8 @@ public static class UiZoom
 
     private static void OnWheel(object? sender, PointerWheelEventArgs e)
     {
-        if (!e.KeyModifiers.HasFlag(KeyModifiers.Control) || e.Delta.Y == 0)
+        // Ctrl, or Cmd on a Mac.
+        if (!(e.KeyModifiers.HasFlag(KeyModifiers.Control) || e.KeyModifiers.HasFlag(KeyModifiers.Meta)) || e.Delta.Y == 0)
             return;
         Set(Scale + Math.Sign(e.Delta.Y) * Step);
         e.Handled = true;

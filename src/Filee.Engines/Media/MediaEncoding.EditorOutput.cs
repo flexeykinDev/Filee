@@ -51,11 +51,12 @@ internal static partial class MediaEncoding
     /// <summary>
     /// The arguments that write <paramref name="edit"/> (an editor clip, clamped) as <paramref name="target"/>:
     /// <paramref name="hardware"/> encodes it when given (else the preset's codec in software), with the preset's quality
-    /// or, under the clip's size limit, the bitrate that fits it. The texts' files go into <paramref name="workFolder"/>.
+    /// or, under the clip's size limit, the bitrate that fits it. The texts' files go into <paramref name="workFolder"/>
+    /// (null: the texts are left out, for an FFmpeg without drawtext).
     /// </summary>
     /// <exception cref="NotSupportedException">FFmpeg cannot write <paramref name="target"/> as a video.</exception>
     internal static List<string> EditorArguments(ClipEdit edit, Func<string?, EditorSource> sourceOf, string output, string target,
-        MediaOptions options, IReadOnlySet<string>? encoders, HardwareEncoder? hardware, string workFolder)
+        MediaOptions options, IReadOnlySet<string>? encoders, HardwareEncoder? hardware, string? workFolder)
     {
         var gif = target == "gif";
         if (!gif && !VideoTargets.ContainsKey(target))

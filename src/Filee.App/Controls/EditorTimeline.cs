@@ -883,18 +883,18 @@ public sealed class EditorTimeline : Control
                 host.MoveText(_index, Snap(Math.Max(0, _startAtPress + (point.X - _pressedAt.X) / pps), host, _index));
                 break;
             case Drag.TextStart:
-            {
-                var end = _startAtPress + _lengthAtPress;
-                var start = Math.Clamp(Snap(_startAtPress + (point.X - _pressedAt.X) / pps, host, _index), 0, end - ClipRange.MinLength);
-                host.ResizeText(_index, start, end - start);
-                break;
-            }
+                {
+                    var end = _startAtPress + _lengthAtPress;
+                    var start = Math.Clamp(Snap(_startAtPress + (point.X - _pressedAt.X) / pps, host, _index), 0, end - ClipRange.MinLength);
+                    host.ResizeText(_index, start, end - start);
+                    break;
+                }
             case Drag.TextEnd:
-            {
-                var end = Snap(_startAtPress + _lengthAtPress + (point.X - _pressedAt.X) / pps, host, _index);
-                host.ResizeText(_index, _startAtPress, Math.Max(ClipRange.MinLength, end - _startAtPress));
-                break;
-            }
+                {
+                    var end = Snap(_startAtPress + _lengthAtPress + (point.X - _pressedAt.X) / pps, host, _index);
+                    host.ResizeText(_index, _startAtPress, Math.Max(ClipRange.MinLength, end - _startAtPress));
+                    break;
+                }
             case Drag.Pending when Math.Abs(point.X - _pressedAt.X) >= DragThreshold:
                 if (_pendingLane == Lane.Music)
                 {
@@ -1036,7 +1036,7 @@ public sealed class EditorTimeline : Control
     {
         base.OnPointerWheelChanged(e);
         // Ctrl + wheel belongs to the window (everything larger or smaller).
-        if (e.KeyModifiers.HasFlag(KeyModifiers.Control))
+        if (e.KeyModifiers.HasFlag(KeyModifiers.Control) || e.KeyModifiers.HasFlag(KeyModifiers.Meta))
             return;
         if (e.KeyModifiers.HasFlag(KeyModifiers.Alt))
         {

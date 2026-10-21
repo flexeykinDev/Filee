@@ -2038,7 +2038,7 @@ public class RenderTests
         try
         {
             var frames = new ClipWindowTests.PaintedFrames(300);
-            var vm = new JoinVideosViewModel([@"D:\Videos\clip 10.mp4", @"D:\Videos\clip 2.mp4", @"D:\Videos\phone tall.mp4"],
+            var vm = new JoinVideosViewModel([.. new[] { "clip 10.mp4", "clip 2.mp4", "phone tall.mp4" }.Select(name => Path.Combine(Path.GetTempPath(), name))],
                 AppHost.Get<ILocalizer>(), frames);
             var window = new JoinVideosWindow { DataContext = vm };
             window.Show();
