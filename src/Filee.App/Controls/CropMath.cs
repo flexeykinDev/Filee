@@ -1,5 +1,5 @@
 // The crop overlay's arithmetic without a window: the ratios of the aspect dial, keyboard nudges, the frame's size in
-// pixels and where the size chip sits next to the frame.
+// pixels, where the size chip sits next to the frame and where the aspect dial opens.
 
 using Avalonia;
 
@@ -78,5 +78,27 @@ public static class CropMath
         else
             y = frame.Top - ChipGap - chip.Height;
         return new Point(x, Math.Clamp(y, area.Top, Math.Max(area.Top, area.Bottom - chip.Height)));
+    }
+
+    /// <summary>Space kept between the aspect dial and the edges of the stage.</summary>
+    public const double DialMargin = 8;
+
+    /// <summary>Space between the aspect dial and the toolbar button it grows out of.</summary>
+    public const double DialGap = 4;
+
+    /// <summary>
+    /// Top-left corner of the aspect dial (a square of <paramref name="side"/>) on a stage of <paramref name="stage"/>:
+    /// centred on <paramref name="pointer"/> when A was pressed with the pointer over the stage, as the donut opens
+    /// around the pointer; otherwise centred over its toolbar button, a little above <paramref name="buttonTop"/> (the
+    /// middle of the button's top edge). Kept inside the stage.
+    /// </summary>
+    public static Point DialOrigin(Point? pointer, Point buttonTop, Size stage, double side)
+    {
+        var (x, y) = pointer is { } p
+            ? (p.X - side / 2, p.Y - side / 2)
+            : (buttonTop.X - side / 2, buttonTop.Y - side - DialGap);
+        return new Point(
+            Math.Clamp(x, DialMargin, Math.Max(DialMargin, stage.Width - side - DialMargin)),
+            Math.Clamp(y, DialMargin, Math.Max(DialMargin, stage.Height - side - DialMargin)));
     }
 }

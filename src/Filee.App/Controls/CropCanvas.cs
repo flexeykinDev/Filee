@@ -537,7 +537,13 @@ public sealed class CropCanvas : Control
 
     // ───────────────────────── Motion ─────────────────────────
 
-    private static long Now() => Stopwatch.GetTimestamp();
+    /// <summary>
+    /// The clock the animations read (<see cref="Stopwatch"/> ticks). The What's new clip steps it by hand, a frame at
+    /// a time, so a frame that takes long to capture doesn't jump the animations ahead.
+    /// </summary>
+    internal static Func<long> Clock { get; set; } = Stopwatch.GetTimestamp;
+
+    private static long Now() => Clock();
 
     private static double EaseOutCubic(double t) => 1 - Math.Pow(1 - Math.Clamp(t, 0, 1), 3);
 

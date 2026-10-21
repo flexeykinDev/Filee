@@ -12,13 +12,23 @@ namespace Filee.App.Views;
 
 /// <summary>
 /// The crop overlay's window: placement, keys (Enter saves, Esc closes, R resets, A opens the aspect dial, X swaps
-/// portrait and landscape, arrows move the frame, Shift × 10), the aspect dial over the toolbar and moving, sizing and
-/// maximizing the frameless window.
+/// portrait and landscape, arrows move the frame, Shift × 10), the aspect dial (around the pointer when A is pressed
+/// with the pointer over the stage, else over its toolbar button) and moving, sizing and maximizing the frameless
+/// window.
 /// </summary>
 public partial class CropOverlayWindow : Window
 {
     private CropOverlayViewModel? _vm;
     private bool _dialByKeyboard;
+
+    /// <summary>Where the pointer is over the stage; null while it is outside the window.</summary>
+    private Point? _pointer;
+
+    /// <summary>Where the next opening of the dial centres it (A over the stage); null opens it over its button.</summary>
+    private Point? _openDialAt;
+
+    /// <summary>The centre of the open dial when it opened at the pointer.</summary>
+    private Point? _dialAt;
 
     public CropOverlayWindow()
     {
@@ -30,6 +40,9 @@ public partial class CropOverlayWindow : Window
         AddHandler(KeyDownEvent, OnKeyDownFirst, RoutingStrategies.Tunnel);
         ResizeGrip.PointerPressed += OnGripPressed;
         Stage.SizeChanged += (_, _) => PlaceDial();
+        // Every move over the stage, also over the canvas and the buttons that handle it.
+        Stage.AddHandler(PointerMovedEvent, (_, e) => _pointer = e.GetPosition(Stage), RoutingStrategies.Tunnel, handledEventsToo: true);
+        Stage.PointerExited += (_, _) => _pointer = null;
         Closed += (_, _) => Motion.Changed -= OnMotionChanged;
     }
 
@@ -100,6 +113,9 @@ public partial class CropOverlayWindow : Window
     {
         if (open)
         {
+            // Around the pointer it grows from its middle, as the donut does; over the button, out of the button.
+            (_dialAt, _openDialAt) = (_openDialAt, null);
+            Dial.RenderTransformOrigin = _dialAt is null ? new RelativePoint(0.5, 1, RelativeUnit.Relative) : RelativePoint.Center;
             PlaceDial();
             Dial.IsVisible = true;
             var byKeyboard = _dialByKeyboard;
@@ -121,15 +137,13 @@ public partial class CropOverlayWindow : Window
             Dial.IsVisible = false;
     }
 
-    /// <summary>Centres the dial over its toolbar button, a little above it, inside the window.</summary>
+    /// <summary>Centres the dial on the pointer it opened at, or over its toolbar button, inside the window.</summary>
     private void PlaceDial()
     {
         if (!DialButton.IsEffectivelyVisible || DialButton.TranslatePoint(new Point(DialButton.Bounds.Width / 2, 0), Stage) is not { } anchor)
             return;
-        var side = Dial.Side; // measured only once visible
-        var x = Math.Clamp(anchor.X - side / 2, 8, Math.Max(8, Stage.Bounds.Width - side - 8));
-        var y = Math.Max(8, anchor.Y - side - 4);
-        Dial.Margin = new Thickness(x, y, 0, 0);
+        var origin = CropMath.DialOrigin(_dialAt, anchor, Stage.Bounds.Size, Dial.Side);
+        Dial.Margin = new Thickness(origin.X, origin.Y, 0, 0);
     }
 
     private void OnScrimPressed(object? sender, PointerPressedEventArgs e)
@@ -184,8 +198,12 @@ public partial class CropOverlayWindow : Window
                 e.Handled = true;
                 break;
             case Key.A when plain && vm.IsEditing:
-                _dialByKeyboard = true;
+                // With the pointer over the stage the dial opens around it, to be picked from with the mouse; without,
+                // over its button with a slice focused for the arrow keys.
+                _openDialAt = dialOpen ? null : _pointer;
+                _dialByKeyboard = _openDialAt is null;
                 vm.ToggleAspectDial();
+                _openDialAt = null; // used by now, or the dial didn't open (busy)
                 e.Handled = true;
                 break;
             case Key.X when plain && vm.IsEditing:

@@ -653,7 +653,7 @@ public class DonutFlipTests
         {
             if (dark)
                 theme.Apply(new ThemeSettings { Mode = ThemeMode.Dark }, language);
-            var main = new MainWindowViewModel(AppHost.Services, AppHost.Get<ILocalizer>(), AppHost.Get<UpdateService>());
+            using var main = new MainWindowViewModel(AppHost.Services, AppHost.Get<ILocalizer>(), AppHost.Get<UpdateService>());
             main.Navigate("toolbar");
             window = new MainWindow { DataContext = main, Width = 1080, Height = 1000 };
             window.Show();
@@ -675,7 +675,7 @@ public class DonutFlipTests
             Assert.Equal(ImageBack, page.DonutItems.Select(i => i.Id));
             Assert.Equal(ImageBack.Count, page.BackCount);
             Assert.DoesNotContain(page.Palette, chip => ImageBack.Contains(chip.PresetId));
-            Assert.Contains(page.Palette, chip => chip.PresetId == "to-png"); // on the front, still free for the back
+            Assert.DoesNotContain(page.Palette, chip => front.Contains(chip.PresetId)); // on the front, so not offered for the back (#266)
             Assert.Contains(AppHost.Get<ILocalizer>()["toolbar.face_back"], page.CenterSubtitle);
             RenderTests.Save(window, $"toolbar-back-face-{language}{(dark ? "-dark" : "")}.png");
 

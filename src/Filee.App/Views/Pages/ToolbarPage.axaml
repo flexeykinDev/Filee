@@ -13,6 +13,9 @@
              x:Class="Filee.App.Views.Pages.ToolbarPage"
              x:DataType="vm:ToolbarPageViewModel">
   <UserControl.Styles>
+    <Style Selector="Border.chip.dimmed">
+      <Setter Property="Opacity" Value="0.55" />
+    </Style>
     <Style Selector="Border#PaletteBox.over">
       <Setter Property="BorderBrush" Value="{DynamicResource DangerBrush}" />
       <Setter Property="Background" Value="{DynamicResource AccentFaintBrush}" />
@@ -360,7 +363,8 @@
             </ItemsControl.ItemsPanel>
             <ItemsControl.ItemTemplate>
               <DataTemplate x:DataType="vm:PaletteChip">
-                <Border Classes="chip" PointerPressed="OnChipPressed" DoubleTapped="OnChipDoubleTapped">
+                <Border Classes="chip" Classes.dimmed="{Binding IsDimmed}" ToolTip.Tip="{Binding Reason}"
+                        PointerPressed="OnChipPressed" DoubleTapped="OnChipDoubleTapped">
                   <StackPanel Orientation="Horizontal" Spacing="6">
                     <TextBlock Text="{Binding Label}" FontWeight="SemiBold" />
                     <TextBlock Classes="caption" Text="{Binding Caption}" VerticalAlignment="Center" />

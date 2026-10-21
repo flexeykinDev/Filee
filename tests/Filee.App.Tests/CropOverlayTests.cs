@@ -3,10 +3,12 @@
 
 using System.IO;
 using Avalonia;
+using Avalonia.Controls;
 using Avalonia.Headless;
 using Avalonia.Headless.XUnit;
 using Avalonia.Input;
 using Avalonia.Threading;
+using Avalonia.VisualTree;
 using Filee.App.Controls;
 using Filee.App.Services;
 using Filee.App.ViewModels;
@@ -152,6 +154,80 @@ public class CropOverlayTests
             window.Closed += (_, _) => closed = true;
             Press(window, Key.Escape);
             Assert.True(closed);
+        });
+    }
+
+    [AvaloniaTheory]
+    [InlineData("en", false)]
+    [InlineData("en", true)]
+    [InlineData("ar", false)]
+    public void A_over_the_picture_opens_the_dial_around_the_pointer(string language, bool dark)
+    {
+        WithOverlay(language, dark, ["harbour.jpg", "two.jpg"], (window, vm, suffix) =>
+        {
+            var canvas = window.CropCanvas;
+            var dial = window.AspectDial;
+            var origin = (Vector)canvas.TranslatePoint(default, window)!.Value;
+            var image = canvas.CalculateImageBounds().Translate(origin);
+            Point DialCentre() => dial.TranslatePoint(new Point(dial.Bounds.Width / 2, dial.Bounds.Height / 2), window)!.Value;
+
+            // No pointer over the stage yet (the keyboard): over its button, as before.
+            Press(window, Key.A);
+            Settle(window);
+            Assert.True(vm.IsAspectDialOpen);
+            var button = window.GetVisualDescendants().OfType<Button>().Single(b => b.Name == "DialButton");
+            var buttonTop = button.TranslatePoint(new Point(button.Bounds.Width / 2, 0), window)!.Value;
+            Assert.Equal(buttonTop.X, DialCentre().X, 0.5);
+            Assert.Equal(buttonTop.Y - CropMath.DialGap, dial.TranslatePoint(new Point(0, dial.Bounds.Height), window)!.Value.Y, 0.5);
+            Press(window, Key.Escape);
+            Assert.False(vm.IsAspectDialOpen);
+            Assert.True(window.IsVisible);
+
+            // The pointer over the picture: A opens the dial around it.
+            var at = new Point(image.X + image.Width * 0.62, image.Y + image.Height * 0.4);
+            window.MouseMove(at);
+            Press(window, Key.A);
+            Settle(window);
+            Assert.True(vm.IsAspectDialOpen);
+            Assert.Equal(at.X, DialCentre().X, 0.5);
+            Assert.Equal(at.Y, DialCentre().Y, 0.5);
+            Save(window, $"crop-dial-pointer-{suffix}.png");
+
+            // The arrows go round the slices, not the frame; A again closes it.
+            var frame = canvas.NormalizedCropRect;
+            Press(window, Key.Right);
+            Assert.Equal(frame, canvas.NormalizedCropRect);
+            Press(window, Key.A);
+            Assert.False(vm.IsAspectDialOpen);
+
+            // Picked with a click: the slice under the pointer.
+            Press(window, Key.A);
+            Settle(window);
+            var square = dial.Segments.ToList().FindIndex(s => s.Mode == "1:1");
+            var onSquare = dial.TranslatePoint(DonutGeometry.PointAt(new Point(dial.Bounds.Width / 2, dial.Bounds.Height / 2),
+                (dial.InnerRadius + dial.OuterRadius) / 2, DonutGeometry.MidAngle(square, dial.Segments.Count())), window)!.Value;
+            window.MouseMove(onSquare);
+            window.MouseDown(onSquare, MouseButton.Left);
+            window.MouseUp(onSquare, MouseButton.Left);
+            Pump();
+            Assert.Equal("1:1", vm.SelectedAspect);
+            Assert.False(vm.IsAspectDialOpen);
+
+            // Near a corner of the window: moved in until the whole dial shows.
+            var corner = new Point(window.Bounds.Width - 30, 30);
+            window.MouseMove(corner);
+            Press(window, Key.A);
+            Settle(window);
+            var stage = dial.GetVisualParent<Visual>()!;
+            var bounds = new Rect(dial.TranslatePoint(default, stage)!.Value, dial.Bounds.Size);
+            Assert.True(new Rect(stage.Bounds.Size).Deflate(CropMath.DialMargin - 0.5).Contains(bounds), $"{bounds} outside {stage.Bounds}");
+            Press(window, Key.Escape);
+
+            // The toolbar button opens it over the button again, whatever A did before.
+            window.MouseMove(at);
+            vm.ToggleAspectDial();
+            Settle(window);
+            Assert.Equal(buttonTop.X, DialCentre().X, 0.5);
         });
     }
 

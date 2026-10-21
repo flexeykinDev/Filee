@@ -80,4 +80,28 @@ public class CropMathTests
         Assert.Equal(0, CropMath.SizeChipOrigin(new Rect(0, 100, 40, 40), chip, area).X);
         Assert.Equal(700, CropMath.SizeChipOrigin(new Rect(760, 100, 40, 40), chip, area).X);
     }
+
+    [Fact]
+    public void The_dial_opens_around_the_pointer_or_over_its_button_inside_the_stage()
+    {
+        var stage = new Size(1000, 700);
+        const double side = 246;
+        var button = new Point(400, 620);
+
+        // With the pointer over the stage: centred on it.
+        Assert.Equal(new Point(377, 177), CropMath.DialOrigin(new Point(500, 300), button, stage, side));
+
+        // Near an edge or a corner: moved in until it fits, with a margin.
+        Assert.Equal(new Point(CropMath.DialMargin, CropMath.DialMargin), CropMath.DialOrigin(new Point(20, 10), button, stage, side));
+        Assert.Equal(new Point(1000 - side - CropMath.DialMargin, 700 - side - CropMath.DialMargin),
+            CropMath.DialOrigin(new Point(990, 690), button, stage, side));
+
+        // Without a pointer (the keyboard): centred over the button, just above it.
+        Assert.Equal(new Point(277, 620 - side - CropMath.DialGap), CropMath.DialOrigin(null, button, stage, side));
+        // A button near the side still gets the whole dial.
+        Assert.Equal(CropMath.DialMargin, CropMath.DialOrigin(null, new Point(30, 620), stage, side).X);
+
+        // A stage smaller than the dial: from its top left corner.
+        Assert.Equal(new Point(CropMath.DialMargin, CropMath.DialMargin), CropMath.DialOrigin(new Point(100, 100), button, new Size(200, 200), side));
+    }
 }
