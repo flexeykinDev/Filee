@@ -257,6 +257,25 @@ public partial class App : Application
 
         var custom = CustomTheme.Load(AppHost.Get<UserDataStore>().Directory, AppHost.Get<ILogger<App>>());
         AppHost.Get<ThemeService>().Apply(settings.Theme, loc.Language, custom);
+        // Private build: the graphics card encodes videos by default (once; each preset can turn it off again).
+        if (!settings.PrivateGpuDefaultApplied)
+        {
+            var library = AppHost.Get<UserDataStore>();
+            foreach (var preset in library.Presets.Where(p =>
+                         Filee.Core.Presets.MediaCodecs.TakesHardwareEncoding(p.TargetFormat, p.Media.VideoCodec) || p.IsClipTool || p.IsJoinTool))
+                preset.Media.HardwareEncoding = true;
+            settings.PrivateGpuDefaultApplied = true;
+            try
+            {
+                library.SaveLibrary();
+                library.SaveSettings();
+            }
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+            {
+                AppHost.Get<ILogger<App>>().LogWarning(ex, "Could not switch the graphics card on for video presets");
+            }
+        }
+
         // Ctrl + wheel / Ctrl +/- / Ctrl+0: everything larger or smaller, remembered.
         UiZoom.Configure(settings.UiScale, scale =>
         {

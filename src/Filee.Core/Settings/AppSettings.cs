@@ -247,6 +247,12 @@ public sealed class AppSettings
     /// <summary>Every geospatial conversion is saved as a ZIP, whatever the preset says (see <see cref="OutputRule.ZipResult"/>).</summary>
     public bool ZipGeoResults { get; set; }
 
+    /// <summary>
+    /// Private build: "Encode on the graphics card" was switched on once in every video preset (they still fall back to
+    /// the processor when the card can't, and each preset can turn it off).
+    /// </summary>
+    public bool PrivateGpuDefaultApplied { get; set; }
+
     /// <summary>How large Filee's windows draw everything (Ctrl + mouse wheel, Ctrl +/-, Ctrl+0): 1 as designed.</summary>
     public double UiScale { get; set; } = 1;
 
