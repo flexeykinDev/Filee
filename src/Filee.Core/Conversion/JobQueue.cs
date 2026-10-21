@@ -20,7 +20,13 @@ public sealed class JobQueue : IAsyncDisposable
     private readonly ILogger _log;
     private readonly Channel<ConversionJob> _channel = Channel.CreateUnbounded<ConversionJob>();
     private readonly ConcurrentDictionary<string, SemaphoreSlim> _engineGates = new();
-    private readonly HashSet<string> _reservedOutputs = new(StringComparer.OrdinalIgnoreCase);
+    /// <summary>
+    /// Output paths handed out and not released yet, with how many conversions hold each. Also the lock for everything
+    /// about output paths.
+    /// </summary>
+    private readonly Dictionary<string, Reservation> _reservedOutputs = new(StringComparer.OrdinalIgnoreCase);
+    /// <summary>Output folders this queue made (a subfolder, a fixed folder that wasn't there): removed again when left empty.</summary>
+    private readonly HashSet<string> _madeFolders = new(Platform.FileSystemPaths.Comparer);
     private readonly Task _worker;
     private int _busy;
 
@@ -122,8 +128,12 @@ public sealed class JobQueue : IAsyncDisposable
         finally
         {
             lock (_reservedOutputs)
+            {
                 foreach (var output in job.Outputs)
-                    _reservedOutputs.Remove(output);
+                    Unreserve(output);
+                // Folders no running job writes into any more are the user's from now on.
+                _madeFolders.RemoveWhere(folder => !HasReservationIn(folder));
+            }
             TryDelete(workDir);
             Release(job);
         }
@@ -514,8 +524,8 @@ public sealed class JobQueue : IAsyncDisposable
         Notify(job);
         // A file saved from a browser first has part of its progress already.
         var floor = file.Progress;
-        // The last step's outputs: what a failed or cancelled conversion started there is undone, and how many paths
-        // it handed out tells a single output from several.
+        // The last step's allocator: how many paths it handed out tells a single output from several, and what a
+        // failed or cancelled conversion started there is undone through it.
         FinalAllocator? final = null;
 
         try
@@ -573,7 +583,7 @@ public sealed class JobQueue : IAsyncDisposable
                 inputs = PackZip(job, file, index, inputs, ct);
             // One output, and nothing else handed out for it (a Markdown file's picture folder goes with it).
             else if (finalOutput && inputs.Count == 1 && final is { Handed: 1 })
-                inputs = [NextToSource(job, file, index, inputs[0])];
+                inputs = [NextToSource(job, file, index, inputs[0], final)];
 
             // A name the engine took but wrote nothing to is free again.
             final?.Release(except: inputs);
@@ -718,7 +728,7 @@ public sealed class JobQueue : IAsyncDisposable
     /// the subfolder if that left it empty. A file that can't be moved (the policy skips an existing file, or the file
     /// is in use) stays in the subfolder.
     /// </summary>
-    private string NextToSource(ConversionJob job, FileResult file, int index, string output)
+    private string NextToSource(ConversionJob job, FileResult file, int index, string output, FinalAllocator allocator)
     {
         var rule = ForOneFile(job.Preset.Output);
         if (ReferenceEquals(rule, job.Preset.Output) || !File.Exists(output)
@@ -733,7 +743,7 @@ public sealed class JobQueue : IAsyncDisposable
         {
             var tokens = new OutputPathResolver.Tokens(file.SourcePath, job.PresetDisplayName, index, job.CreatedAt);
             var target = OutputPathResolver.Resolve(rule, tokens, Path.GetExtension(output),
-                p => !PathsEqual(p, output) && (File.Exists(p) || Directory.Exists(p) || _reservedOutputs.Contains(p)));
+                p => !PathsEqual(p, output) && (File.Exists(p) || Directory.Exists(p) || _reservedOutputs.ContainsKey(p)));
             if (target is null || PathsEqual(target, output))
                 return output;
             try
@@ -746,25 +756,67 @@ public sealed class JobQueue : IAsyncDisposable
                 _log.LogWarning(ex, "Could not move {Output} next to its source", output);
                 return output;
             }
-            _reservedOutputs.Remove(output);
-            _reservedOutputs.Add(target);
-
-            // Another file of this or a running job may still be written into the same subfolder.
-            var subfolder = Path.GetDirectoryName(output)!;
-            if (!_reservedOutputs.Any(p => PathsEqual(Path.GetDirectoryName(p) ?? "", subfolder)))
-            {
-                try
-                {
-                    if (!Directory.EnumerateFileSystemEntries(subfolder).Any())
-                        Directory.Delete(subfolder);
-                }
-                catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { }
-            }
+            allocator.Moved(output, target);
+            // Another file of this or a running job may still be written into the same subfolder: RemoveIfEmpty waits.
+            RemoveIfEmpty(Path.GetDirectoryName(output)!);
             return target;
         }
 
         static bool PathsEqual(string a, string b) =>
             string.Equals(Path.GetFullPath(a), Path.GetFullPath(b), Platform.FileSystemPaths.Comparison);
+    }
+
+    /// <summary>How many conversions hold an output path, and whether more than one ever did.</summary>
+    private sealed class Reservation
+    {
+        public int Holders = 1;
+
+        /// <summary>
+        /// Handed to a second conversion too: "Overwrite" gives two files that become the same name the same path. Then
+        /// neither may delete it when it fails: the other one's finished file may be there.
+        /// </summary>
+        public bool Shared;
+    }
+
+    /// <summary>Takes <paramref name="path"/> (under the lock); true if nobody held it.</summary>
+    private bool Reserve(string path)
+    {
+        if (_reservedOutputs.TryGetValue(path, out var reservation))
+        {
+            reservation.Holders++;
+            reservation.Shared = true;
+            return false;
+        }
+        _reservedOutputs[path] = new Reservation();
+        return true;
+    }
+
+    /// <summary>Lets go of <paramref name="path"/> (under the lock): free once nobody holds it.</summary>
+    private void Unreserve(string path)
+    {
+        if (_reservedOutputs.TryGetValue(path, out var reservation) && --reservation.Holders <= 0)
+            _reservedOutputs.Remove(path);
+    }
+
+    private bool HasReservationIn(string folder) =>
+        _reservedOutputs.Keys.Any(p => Platform.FileSystemPaths.Comparer.Equals(Path.GetDirectoryName(Path.GetFullPath(p)), folder));
+
+    /// <summary>
+    /// Removes a folder this queue made for outputs once nothing is in it and no running conversion is to write into it
+    /// (under the lock). Never a folder that was there before, and never one with anything inside.
+    /// </summary>
+    private void RemoveIfEmpty(string folder)
+    {
+        folder = Path.GetFullPath(folder);
+        if (!_madeFolders.Contains(folder) || HasReservationIn(folder))
+            return;
+        try
+        {
+            if (Directory.Exists(folder) && !Directory.EnumerateFileSystemEntries(folder).Any())
+                Directory.Delete(folder);
+            _madeFolders.Remove(folder);
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { }
     }
 
     private void Notify(ConversionJob job)
@@ -880,10 +932,14 @@ public sealed class JobQueue : IAsyncDisposable
     /// <summary>Allocates final output paths according to the preset's <see cref="OutputRule"/>.</summary>
     private sealed class FinalAllocator(JobQueue queue, OutputRule rule, OutputPathResolver.Tokens tokens) : IOutputAllocator
     {
-        /// <summary>Every path handed out, and whether nothing was there before (not a file it overwrites).</summary>
-        private readonly List<(string Path, bool New)> _allocated = [];
+        /// <summary>
+        /// Every path handed out, and whether it is this conversion's alone: nothing was there before (not a file it
+        /// overwrites) and no other conversion had it.
+        /// </summary>
+        private readonly List<(string Path, bool Own)> _allocated = [];
+
         /// <summary>How many paths were handed out: an output and the picture folder that goes with it are two.</summary>
-        public int Handed { get; private set; }
+        public int Handed => _allocated.Count;
 
         public string? Allocate(string extension, string? suffix = null)
         {
@@ -891,20 +947,42 @@ public sealed class JobQueue : IAsyncDisposable
             lock (queue._reservedOutputs)
             {
                 var path = OutputPathResolver.Resolve(rule, tokens, extension,
-                    p => File.Exists(p) || Directory.Exists(p) || queue._reservedOutputs.Contains(p), suffix);
+                    p => File.Exists(p) || Directory.Exists(p) || queue._reservedOutputs.ContainsKey(p), suffix);
                 if (path is null)
                     return null;
 
-                _allocated.Add((path, !File.Exists(path) && !Directory.Exists(path)));
-                queue._reservedOutputs.Add(path);
-                Handed++;
-                Directory.CreateDirectory(Path.GetDirectoryName(path)!);
+                var nothingThere = !File.Exists(path) && !Directory.Exists(path);
+                _allocated.Add((path, queue.Reserve(path) && nothingThere));
+                var folder = Path.GetFullPath(Path.GetDirectoryName(path)!);
+                if (!Directory.Exists(folder))
+                {
+                    Directory.CreateDirectory(folder);
+                    queue._madeFolders.Add(folder);
+                }
                 // An empty extension asks for a folder (archive extraction): the converter creates it.
                 return path;
             }
         }
 
-        /// <summary>Frees the names handed out but not in <paramref name="except"/> (the outputs the engine returned).</summary>
+        /// <summary>The one output was moved to <paramref name="to"/> (next to its source): its name goes with it.</summary>
+        public void Moved(string from, string to)
+        {
+            lock (queue._reservedOutputs)
+            {
+                var index = _allocated.FindIndex(a => string.Equals(a.Path, from, StringComparison.OrdinalIgnoreCase));
+                if (index < 0)
+                    return;
+                // Finished and in its place: nothing to undo there any more.
+                _allocated[index] = (to, false);
+                queue.Unreserve(from);
+                queue.Reserve(to);
+            }
+        }
+
+        /// <summary>
+        /// Frees the names handed out but not in <paramref name="except"/> (the outputs the engine returned, which stay
+        /// taken until the job ends).
+        /// </summary>
         public void Release(IEnumerable<string> except)
         {
             var kept = except.ToHashSet(StringComparer.OrdinalIgnoreCase);
@@ -913,26 +991,31 @@ public sealed class JobQueue : IAsyncDisposable
                 foreach (var (path, _) in _allocated)
                 {
                     if (!kept.Contains(path))
-                        queue._reservedOutputs.Remove(path);
+                        queue.Unreserve(path);
                 }
+                _allocated.Clear();
             }
         }
 
         /// <summary>
-        /// Undoes a conversion that failed or was cancelled: deletes what it started writing where nothing was before
-        /// (never a file it was to overwrite), so no half-written file is left where the user expects a finished one,
-        /// and frees every name, so trying again gets the same one instead of "name (2)".
+        /// Undoes a conversion that failed or was cancelled: deletes what it started writing at paths that were its
+        /// alone (never a file it was to overwrite, nor one another conversion had too), so no half-written file is left
+        /// where the user expects a finished one; frees every name, so trying again gets the same one instead of
+        /// "name (2)"; and removes a folder it made for them if that left it empty.
         /// </summary>
         public void Discard()
         {
             lock (queue._reservedOutputs)
             {
-                foreach (var (path, isNew) in _allocated)
+                foreach (var (path, own) in _allocated)
                 {
-                    if (isNew)
+                    if (own && queue._reservedOutputs.TryGetValue(path, out var reservation) && !reservation.Shared)
                         TryDeleteOutput(path);
-                    queue._reservedOutputs.Remove(path);
+                    queue.Unreserve(path);
                 }
+                foreach (var folder in _allocated.Select(a => Path.GetDirectoryName(Path.GetFullPath(a.Path))!)
+                             .Distinct(Platform.FileSystemPaths.Comparer).ToList())
+                    queue.RemoveIfEmpty(folder);
                 _allocated.Clear();
             }
         }
