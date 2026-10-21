@@ -43,6 +43,12 @@ public sealed class ThemeSettings
     /// </summary>
     public bool? ReduceMotion { get; set; }
 
+    /// <summary>
+    /// The pixel style: dark only, one lavender accent, square stepped corners, film grain and dot-matrix digits.
+    /// While it is on it decides the light/dark mode, accent and corner radius; the user's choices come back when it's off.
+    /// </summary>
+    public bool Pixel { get; set; } = true;
+
     public ThemeSettings Clone() => (ThemeSettings)MemberwiseClone();
 }
 

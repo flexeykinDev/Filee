@@ -2,6 +2,7 @@
 <Window xmlns="https://github.com/avaloniaui"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         xmlns:vm="using:Filee.App.ViewModels"
+        xmlns:c="using:Filee.App.Controls"
         xmlns:s="using:Filee.App.Services"
         x:Class="Filee.App.Views.ToastWindow"
         x:DataType="s:ConversionService"
@@ -113,7 +114,26 @@
                   </StackPanel>
                 </Button>
               </StackPanel>
-              <TextBlock Classes="caption" Text="{Binding Status}" VerticalAlignment="Center" />
+              <Panel VerticalAlignment="Center">
+                <TextBlock Classes="caption" Text="{Binding Status}" VerticalAlignment="Center">
+                  <TextBlock.IsVisible>
+                    <MultiBinding Converter="{x:Static BoolConverters.Or}">
+                      <Binding Path="!IsRunning" />
+                      <ReflectionBinding Source="{x:Static c:PixelState.Instance}" Path="!IsOn" />
+                    </MultiBinding>
+                  </TextBlock.IsVisible>
+                </TextBlock>
+                <!-- The pixel style counts the percent in dots -->
+                <c:DotMatrix Dot="2" Foreground="{DynamicResource AccentBrush}" HorizontalAlignment="Left" VerticalAlignment="Center"
+                             Text="{Binding Progress, StringFormat={}{0:0}%}">
+                  <c:DotMatrix.IsVisible>
+                    <MultiBinding Converter="{x:Static BoolConverters.And}">
+                      <Binding Path="IsRunning" />
+                      <ReflectionBinding Source="{x:Static c:PixelState.Instance}" Path="IsOn" />
+                    </MultiBinding>
+                  </c:DotMatrix.IsVisible>
+                </c:DotMatrix>
+              </Panel>
             </DockPanel>
             <TextBlock Classes="caption danger" Text="{Binding ErrorDetails}" TextWrapping="Wrap" MaxLines="4"
                        IsVisible="{Binding HasErrors}" />

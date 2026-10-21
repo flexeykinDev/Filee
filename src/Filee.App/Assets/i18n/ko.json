@@ -633,6 +633,8 @@
   "theme.donut_opacity": "원형 툴바 불투명도",
   "theme.reduce_motion": "애니메이션 줄이기",
   "theme.reduce_motion_hint": "저사양 PC에 권장해요. 전환 효과와 도넛의 튕김 효과를 꺼요.",
+  "theme.pixel": "Pixel style",
+  "theme.pixel_hint": "Dark, square and grainy: stepped corners, one lavender accent, digits in dots. While it's on, it picks the mode, accent and corners below.",
   "theme.preview": "미리보기",
 
   "engines.title": "변환 엔진",

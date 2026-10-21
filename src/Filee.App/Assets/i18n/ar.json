@@ -617,6 +617,8 @@
   "theme.donut_opacity": "شفافية شريط الأدوات الدائري",
   "theme.reduce_motion": "تقليل الرسوم المتحركة",
   "theme.reduce_motion_hint": "موصى به للحواسيب القديمة. يعطّل الانتقالات وحركة ارتداد الشريط الدائري.",
+  "theme.pixel": "Pixel style",
+  "theme.pixel_hint": "Dark, square and grainy: stepped corners, one lavender accent, digits in dots. While it's on, it picks the mode, accent and corners below.",
   "theme.preview": "معاينة",
   "engines.title": "محركات التحويل",
   "engines.description": "يختار Filee أفضل محرك متاح لكل تحويل.\nإذا أمكن لعدة محركات تنفيذ المهمة نفسها، تكون الأولوية للأعلى في القائمة.",

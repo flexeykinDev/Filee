@@ -28,6 +28,7 @@ public sealed partial class ThemePageViewModel : ObservableObject
         CornerRadius = theme.CornerRadius;
         DonutOpacity = Math.Round(Math.Clamp(store.Settings.Donut.Opacity, DonutSettings.MinOpacity, 1) * 100);
         ReduceMotion = theme.ReduceMotion ?? platform.PrefersReducedMotion;
+        Pixel = theme.Pixel;
         PreviewItems =
         [
             new DonutItem { Id = "a", Label = "PNG" },
@@ -67,6 +68,8 @@ public sealed partial class ThemePageViewModel : ObservableObject
     };
     [ObservableProperty] private double _cornerRadius;
     [ObservableProperty] private bool _reduceMotion;
+    /// <summary>The pixel style (ThemeSettings.Pixel).</summary>
+    [ObservableProperty] private bool _pixel;
 
     /// <summary>
     /// The donut toolbar's opacity in percent: the one setting Donut toolbar → Appearance → Opacity edits too (each
@@ -95,6 +98,7 @@ public sealed partial class ThemePageViewModel : ObservableObject
     }
     partial void OnCornerRadiusChanged(double value) => Save(t => t.CornerRadius = Math.Round(value));
     partial void OnReduceMotionChanged(bool value) => Save(t => t.ReduceMotion = value);
+    partial void OnPixelChanged(bool value) => Save(t => t.Pixel = value);
 
     partial void OnDonutOpacityChanged(double value)
     {

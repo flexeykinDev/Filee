@@ -1,0 +1,120 @@
+<!--
+  The pixel style (ThemeSettings.Pixel), added after Soft.axaml by ThemeService while it is on: an almost black dark
+  palette, one lavender accent, no rounded corners anywhere, stepped "pixel" corners (PixelFrame) on cards, buttons
+  and fields, and film grain (PixelGrain) over the windows that aren't see-through.
+-->
+<Styles xmlns="https://github.com/avaloniaui"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:c="using:Filee.App.Controls">
+  <Styles.Resources>
+    <ResourceDictionary>
+      <ResourceDictionary.ThemeDictionaries>
+        <ResourceDictionary x:Key="Dark">
+          <SolidColorBrush x:Key="PageBrush" Color="#09090B" />
+          <SolidColorBrush x:Key="SurfaceBrush" Color="#0F0F12" />
+          <SolidColorBrush x:Key="SurfaceAltBrush" Color="#131317" />
+          <SolidColorBrush x:Key="SubtleBorderBrush" Color="#2A2A31" />
+          <SolidColorBrush x:Key="TextPrimaryBrush" Color="#ECECF1" />
+          <SolidColorBrush x:Key="TextSecondaryBrush" Color="#85858F" />
+          <SolidColorBrush x:Key="DangerBrush" Color="#E2683A" />
+          <SolidColorBrush x:Key="WarningBrush" Color="#E2683A" />
+        </ResourceDictionary>
+      </ResourceDictionary.ThemeDictionaries>
+
+      <SolidColorBrush x:Key="PixelLineHiBrush" Color="#3A3A44" />
+      <SolidColorBrush x:Key="PixelFieldBrush" Color="#0A0A0D" />
+      <SolidColorBrush x:Key="PixelAccentDeepBrush" Color="#7A68D6" />
+      <SolidColorBrush x:Key="PixelSelectedBrush" Color="#59463A78" />
+
+      <!-- Fluent's own control colours -->
+      <SolidColorBrush x:Key="ButtonBackground" Color="#131317" />
+      <SolidColorBrush x:Key="ButtonBackgroundPointerOver" Color="#1A1A20" />
+      <SolidColorBrush x:Key="ButtonBackgroundPressed" Color="#0F0F12" />
+      <SolidColorBrush x:Key="ButtonBorderBrush" Color="#3A3A44" />
+      <SolidColorBrush x:Key="ButtonBorderBrushPointerOver" Color="#55555E" />
+      <SolidColorBrush x:Key="ButtonBorderBrushPressed" Color="#7A68D6" />
+      <SolidColorBrush x:Key="ToggleButtonBackground" Color="#131317" />
+      <SolidColorBrush x:Key="ToggleButtonBorderBrush" Color="#3A3A44" />
+      <SolidColorBrush x:Key="AccentButtonBorderBrush" Color="#D6CBFF" />
+      <SolidColorBrush x:Key="AccentButtonBorderBrushPointerOver" Color="#ECE6FF" />
+      <SolidColorBrush x:Key="AccentButtonForeground" Color="#17132A" />
+      <SolidColorBrush x:Key="AccentButtonForegroundPointerOver" Color="#17132A" />
+      <SolidColorBrush x:Key="AccentButtonForegroundPressed" Color="#17132A" />
+      <SolidColorBrush x:Key="TextControlBackground" Color="#0A0A0D" />
+      <SolidColorBrush x:Key="TextControlBackgroundPointerOver" Color="#0A0A0D" />
+      <SolidColorBrush x:Key="TextControlBackgroundFocused" Color="#0A0A0D" />
+      <SolidColorBrush x:Key="TextControlBorderBrush" Color="#3A3A44" />
+      <SolidColorBrush x:Key="TextControlBorderBrushPointerOver" Color="#55555E" />
+      <SolidColorBrush x:Key="TextControlBorderBrushFocused" Color="#7A68D6" />
+      <SolidColorBrush x:Key="ComboBoxBackground" Color="#0A0A0D" />
+      <SolidColorBrush x:Key="ComboBoxBackgroundPointerOver" Color="#0F0F12" />
+      <SolidColorBrush x:Key="ComboBoxBorderBrush" Color="#3A3A44" />
+      <SolidColorBrush x:Key="ComboBoxBorderBrushPointerOver" Color="#55555E" />
+      <SolidColorBrush x:Key="ComboBoxDropDownBackground" Color="#0F0F12" />
+      <SolidColorBrush x:Key="ComboBoxDropDownBorderBrush" Color="#3A3A44" />
+      <BoxShadows x:Key="CardShadow">0 0 0 0 Transparent</BoxShadows>
+    </ResourceDictionary>
+  </Styles.Resources>
+
+  <!-- Film grain over the windows; PixelGrain leaves out the see-through ones (the donut, the toast, the notices).
+       Window subclasses are styled as Window, so the selector can't name them. -->
+  <Style Selector="Window">
+    <Setter Property="c:PixelGrain.IsEnabled" Value="True" />
+  </Style>
+
+  <!-- Stepped corners on every framed thing -->
+  <Style Selector="Border.card, Border#DropZone, Border.chip, Border.badge, Button, ToggleButton, RepeatButton, TextBox, ComboBox, NumericUpDown, ListBox.nav ListBoxItem, ListBox.soft ListBoxItem">
+    <Setter Property="c:PixelFrame.IsEnabled" Value="True" />
+  </Style>
+  <Style Selector="Border.chip, Border.badge">
+    <Setter Property="CornerRadius" Value="0" />
+  </Style>
+  <Style Selector="ProgressBar.soft">
+    <Setter Property="CornerRadius" Value="0" />
+  </Style>
+  <Style Selector="Border.card">
+    <Setter Property="BorderBrush" Value="{DynamicResource SubtleBorderBrush}" />
+    <Setter Property="BoxShadow" Value="{DynamicResource CardShadow}" />
+  </Style>
+  <Style Selector="Border.chip, Border.badge">
+    <Setter Property="BorderBrush" Value="{DynamicResource PixelLineHiBrush}" />
+    <Setter Property="BorderThickness" Value="1" />
+  </Style>
+
+  <!-- Hierarchy by weight and grey, not colour -->
+  <Style Selector="TextBlock.h1, TextBlock.h2">
+    <Setter Property="FontWeight" Value="Bold" />
+  </Style>
+
+  <!-- Buttons: a 1px frame, no spring -->
+  <Style Selector="Button, ToggleButton, RepeatButton">
+    <Setter Property="BorderThickness" Value="1" />
+    <Setter Property="BorderBrush" Value="{DynamicResource ButtonBorderBrush}" />
+  </Style>
+  <Style Selector="Button:pressed, ToggleButton:pressed">
+    <Setter Property="RenderTransform" Value="none" />
+  </Style>
+  <Style Selector="Button.accent">
+    <Setter Property="BorderBrush" Value="{DynamicResource AccentButtonBorderBrush}" />
+    <Setter Property="FontWeight" Value="Bold" />
+  </Style>
+  <Style Selector="Button.ghost, Button.icon">
+    <Setter Property="BorderThickness" Value="0" />
+  </Style>
+  <Style Selector="Button.navlink">
+    <Setter Property="BorderThickness" Value="1" />
+  </Style>
+
+  <!-- Navigation: the selected page in a lavender frame -->
+  <Style Selector="ListBox.nav ListBoxItem:pointerover">
+    <Setter Property="RenderTransform" Value="none" />
+  </Style>
+  <Style Selector="ListBox.nav ListBoxItem:selected, ListBox.soft ListBoxItem:selected">
+    <Setter Property="BorderBrush" Value="{DynamicResource PixelAccentDeepBrush}" />
+    <Setter Property="BorderThickness" Value="1" />
+  </Style>
+  <Style Selector="ListBox.nav ListBoxItem:selected /template/ ContentPresenter#PART_ContentPresenter, ListBox.nav ListBoxItem:selected:pointerover /template/ ContentPresenter#PART_ContentPresenter, ListBox.soft ListBoxItem:selected /template/ ContentPresenter#PART_ContentPresenter">
+    <Setter Property="Background" Value="{DynamicResource PixelSelectedBrush}" />
+    <Setter Property="Foreground" Value="{DynamicResource AccentBrush}" />
+  </Style>
+</Styles>
