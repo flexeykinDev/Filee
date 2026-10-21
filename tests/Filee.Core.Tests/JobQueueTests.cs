@@ -633,6 +633,39 @@ public class JobQueueTests
     }
 
     [Fact]
+    public void Work_folders_a_crash_left_behind_are_deleted_and_running_ones_kept()
+    {
+        using var root = new TempDir();
+        var old = DateTime.UtcNow.AddDays(-3);
+        string Folder(string name, DateTime written, string? nested = null)
+        {
+            var folder = Path.Combine(root.Path, name);
+            Directory.CreateDirectory(Path.Combine(folder, "a1b2c3d4"));
+            var file = Path.Combine(folder, "a1b2c3d4", "page.tiff");
+            File.WriteAllText(file, "x");
+            File.SetLastWriteTimeUtc(file, nested is null ? written : DateTime.UtcNow);
+            Directory.SetLastWriteTimeUtc(Path.Combine(folder, "a1b2c3d4"), written);
+            Directory.SetLastWriteTimeUtc(folder, written);
+            return folder;
+        }
+
+        var crashed = Folder("0123456789", old);
+        var running = Folder("abcdef0123", DateTime.UtcNow);
+        // Made days ago, but a long encode is still writing into it.
+        var encoding = Folder("fedcba9876", old, nested: "still writing");
+        var web = Folder("web", old);
+        var other = Folder("not-a-job", old);
+
+        JobQueue.DeleteStaleWorkFolders(root.Path, TimeSpan.FromDays(1));
+
+        Assert.False(Directory.Exists(crashed));
+        Assert.True(Directory.Exists(running));
+        Assert.True(Directory.Exists(encoding));
+        Assert.True(Directory.Exists(web)); // WebDrop.DeleteStale's
+        Assert.True(Directory.Exists(other));
+    }
+
+    [Fact]
     public async Task Enqueue_runs_in_background_and_raises_finished()
     {
         using var dir = new TempDir();

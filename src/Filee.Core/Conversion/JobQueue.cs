@@ -79,7 +79,7 @@ public sealed class JobQueue : IAsyncDisposable
         job.State = JobState.Running;
         Notify(job);
 
-        var workDir = Path.Combine(Path.GetTempPath(), "Filee", job.Id);
+        var workDir = Path.Combine(DefaultWorkRoot, job.Id);
         Directory.CreateDirectory(workDir);
         try
         {
@@ -725,6 +725,46 @@ public sealed class JobQueue : IAsyncDisposable
             {
                 Interlocked.Decrement(ref _busy);
             }
+        }
+    }
+
+    /// <summary>Where every job has its work folder, named by the job's <see cref="ConversionJob.Id"/>.</summary>
+    public static string DefaultWorkRoot => Path.Combine(Path.GetTempPath(), "Filee");
+
+    /// <summary>
+    /// Deletes the work folders of jobs a crash, a forced quit or a power cut kept from removing them: intermediate
+    /// PDFs, TIFF pages and video frames can take gigabytes, and the OS doesn't empty its temp folder by itself. Only a
+    /// job's folder nothing was written in for <paramref name="age"/> goes, so a job still running in another Filee (the
+    /// command line) keeps its own; files from a browser have a sweep of their own (<c>WebDrop.DeleteStale</c>).
+    /// </summary>
+    public static void DeleteStaleWorkFolders(string workRoot, TimeSpan age)
+    {
+        try
+        {
+            if (!Directory.Exists(workRoot))
+                return;
+            foreach (var folder in Directory.EnumerateDirectories(workRoot))
+            {
+                if (IsJobId(Path.GetFileName(folder)) && DateTime.UtcNow - LastWrite(folder) > age)
+                    TryDelete(folder);
+            }
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+        }
+
+        static bool IsJobId(string name) => name.Length == 10 && name.All(char.IsAsciiHexDigitLower);
+
+        // A folder's own time changes only when an entry right inside it does: a long job writes deeper down.
+        static DateTime LastWrite(string folder)
+        {
+            var last = Directory.GetLastWriteTimeUtc(folder);
+            foreach (var entry in new DirectoryInfo(folder).EnumerateFileSystemInfos("*", SearchOption.AllDirectories))
+            {
+                if (entry.LastWriteTimeUtc > last)
+                    last = entry.LastWriteTimeUtc;
+            }
+            return last;
         }
     }
 
