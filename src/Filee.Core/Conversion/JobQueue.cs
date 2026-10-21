@@ -253,7 +253,15 @@ public sealed class JobQueue : IAsyncDisposable
             return;
         }
 
-        await _pdfMerger!.MergeAsync(inputs, output, job.CancellationToken);
+        try
+        {
+            await _pdfMerger!.MergeAsync(inputs, output, job.CancellationToken);
+        }
+        catch
+        {
+            allocator.Discard();
+            throw;
+        }
         first.Outputs.Add(output);
         foreach (var f in job.Files.Where(f => f.State != FileState.Failed))
         {
@@ -289,14 +297,23 @@ public sealed class JobQueue : IAsyncDisposable
             return;
 
         var first = job.Files[0];
-        var output = CreateFinalAllocator(job, first.SourcePath, 1).Allocate("tiff");
+        var allocator = CreateFinalAllocator(job, first.SourcePath, 1);
+        var output = allocator.Allocate("tiff");
         if (output is null)
         {
             foreach (var f in job.Files) f.State = FileState.Skipped;
             return;
         }
 
-        await _tiffMerger!.MergeAsync(inputs, output, job.Preset.Image, job.CancellationToken);
+        try
+        {
+            await _tiffMerger!.MergeAsync(inputs, output, job.Preset.Image, job.CancellationToken);
+        }
+        catch
+        {
+            allocator.Discard();
+            throw;
+        }
         first.Outputs.Add(output);
         foreach (var f in job.Files.Where(f => f.State != FileState.Failed))
         {
@@ -335,7 +352,8 @@ public sealed class JobQueue : IAsyncDisposable
             return;
         }
 
-        var output = CreateFinalAllocator(job, inputs[0].SourcePath, 1).Allocate(format.PrimaryExtension);
+        var allocator = CreateFinalAllocator(job, inputs[0].SourcePath, 1);
+        var output = allocator.Allocate(format.PrimaryExtension);
         if (output is null)
         {
             foreach (var f in inputs)
@@ -374,11 +392,13 @@ public sealed class JobQueue : IAsyncDisposable
         }
         catch (OperationCanceledException)
         {
+            allocator.Discard();
             foreach (var f in inputs)
                 f.State = FileState.Cancelled;
         }
         catch (Exception ex)
         {
+            allocator.Discard();
             _log.LogWarning(ex, "Packing {Count} file(s) into {Output} failed", inputs.Count, output);
             foreach (var f in inputs)
                 MarkFailed(f, ex.Message);
@@ -494,6 +514,8 @@ public sealed class JobQueue : IAsyncDisposable
         Notify(job);
         // A file saved from a browser first has part of its progress already.
         var floor = file.Progress;
+        // The last step's outputs: what a failed or cancelled conversion started there is undone.
+        FinalAllocator? final = null;
 
         try
         {
@@ -505,7 +527,7 @@ public sealed class JobQueue : IAsyncDisposable
                 var step = route.Steps[s];
                 var isLast = s == route.Steps.Count - 1;
                 IOutputAllocator allocator = isLast && finalOutput && !zipResult
-                    ? CreateFinalAllocator(job, file.SourcePath, index)
+                    ? final = CreateFinalAllocator(job, file.SourcePath, index)
                     : new TempAllocator(workDir, FormatRegistry.NameWithoutExtension(file.SourcePath));
 
                 var outputs = new List<string>();
@@ -549,6 +571,8 @@ public sealed class JobQueue : IAsyncDisposable
             if (zipResult && inputs.Count > 0)
                 inputs = PackZip(job, file, index, inputs, ct);
 
+            // A name the engine took but wrote nothing to is free again.
+            final?.Release(except: inputs);
             if (finalOutput)
             {
                 file.Outputs.AddRange(inputs);
@@ -562,17 +586,20 @@ public sealed class JobQueue : IAsyncDisposable
         }
         catch (OperationCanceledException)
         {
+            final?.Discard();
             file.State = FileState.Cancelled;
             Notify(job);
             return [];
         }
         catch (ConversionRefusedException ex)
         {
+            final?.Discard();
             _log.LogInformation("Converting {File} was refused: {Reason}", file.SourcePath, ex.Message);
             return Fail(file, ex.ErrorKey, ex.Detail);
         }
         catch (Exception ex)
         {
+            final?.Discard();
             _log.LogWarning(ex, "Converting {File} failed", file.SourcePath);
             return Fail(file, "error.conversion_failed", ex.Message);
         }
@@ -610,7 +637,8 @@ public sealed class JobQueue : IAsyncDisposable
     /// </summary>
     private IReadOnlyList<string> PackZip(ConversionJob job, FileResult file, int index, IReadOnlyList<string> files, CancellationToken ct)
     {
-        if (CreateFinalAllocator(job, file.SourcePath, index).Allocate("zip") is not { } zipPath)
+        var allocator = CreateFinalAllocator(job, file.SourcePath, index);
+        if (allocator.Allocate("zip") is not { } zipPath)
             return [];
         try
         {
@@ -635,6 +663,7 @@ public sealed class JobQueue : IAsyncDisposable
                 File.Delete(zipPath);
             }
             catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { }
+            allocator.Discard();
             throw;
         }
         return [zipPath];
@@ -719,6 +748,9 @@ public sealed class JobQueue : IAsyncDisposable
     /// <summary>Allocates final output paths according to the preset's <see cref="OutputRule"/>.</summary>
     private sealed class FinalAllocator(JobQueue queue, OutputRule rule, OutputPathResolver.Tokens tokens) : IOutputAllocator
     {
+        /// <summary>Every path handed out, and whether nothing was there before (not a file it overwrites).</summary>
+        private readonly List<(string Path, bool New)> _allocated = [];
+
         public string? Allocate(string extension, string? suffix = null)
         {
             // Reserve under a lock so two parallel files never pick the same name.
@@ -729,10 +761,59 @@ public sealed class JobQueue : IAsyncDisposable
                 if (path is null)
                     return null;
 
+                _allocated.Add((path, !File.Exists(path) && !Directory.Exists(path)));
                 queue._reservedOutputs.Add(path);
                 Directory.CreateDirectory(Path.GetDirectoryName(path)!);
                 // An empty extension asks for a folder (archive extraction): the converter creates it.
                 return path;
+            }
+        }
+
+        /// <summary>Frees the names handed out but not in <paramref name="except"/> (the outputs the engine returned).</summary>
+        public void Release(IEnumerable<string> except)
+        {
+            var kept = except.ToHashSet(StringComparer.OrdinalIgnoreCase);
+            lock (queue._reservedOutputs)
+            {
+                foreach (var (path, _) in _allocated)
+                {
+                    if (!kept.Contains(path))
+                        queue._reservedOutputs.Remove(path);
+                }
+            }
+        }
+
+        /// <summary>
+        /// Undoes a conversion that failed or was cancelled: deletes what it started writing where nothing was before
+        /// (never a file it was to overwrite), so no half-written file is left where the user expects a finished one,
+        /// and frees every name, so trying again gets the same one instead of "name (2)".
+        /// </summary>
+        public void Discard()
+        {
+            lock (queue._reservedOutputs)
+            {
+                foreach (var (path, isNew) in _allocated)
+                {
+                    if (isNew)
+                        TryDeleteOutput(path);
+                    queue._reservedOutputs.Remove(path);
+                }
+                _allocated.Clear();
+            }
+        }
+
+        private void TryDeleteOutput(string path)
+        {
+            try
+            {
+                if (File.Exists(path))
+                    File.Delete(path);
+                else if (Directory.Exists(path))
+                    Directory.Delete(path, recursive: true);
+            }
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+            {
+                queue._log.LogWarning(ex, "Could not delete the unfinished output {Output}", path);
             }
         }
     }
