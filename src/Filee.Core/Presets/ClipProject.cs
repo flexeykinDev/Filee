@@ -182,22 +182,19 @@ public sealed class ClipProject
     }
 
     /// <summary>
-    /// Drags an edge of part <paramref name="index"/> on the timeline: its end with <paramref name="end"/>, to
-    /// <paramref name="seconds"/> into the clip; its start, dragged <paramref name="seconds"/> later than where the part
-    /// starts (earlier: negative), takes more or less from the start of its video while the part keeps its place.
-    /// Outwards it takes more of the video, as far as the video goes; inwards less, down to
+    /// Drags an edge of part <paramref name="index"/> on the timeline so that it plays <paramref name="length"/>
+    /// seconds: its end edge (<paramref name="end"/>) takes more or less from the end of its video, its start edge from
+    /// the start of it, while the part keeps its place. Outwards as far as the video goes; inwards down to
     /// <see cref="ClipRange.MinLength"/>. What follows moves along. A still's or pause's edge sets how long it lasts.
     /// A drag is one undo step. Returns how long the part plays now.
     /// </summary>
-    public double TrimEdge(int index, bool end, double seconds)
+    public double TrimEdge(int index, bool end, double length)
     {
-        if (index < 0 || index >= _edit.Parts.Count || !double.IsFinite(seconds))
+        if (index < 0 || index >= _edit.Parts.Count || !double.IsFinite(length))
             return double.NaN;
         var part = _edit.Parts[index];
-        var length = part.Length;
-        var wanted = end ? seconds - Starts()[index] : length - seconds;
-        var trimmed = Trimmed(part, end, Math.Max(ClipRange.MinLength, wanted));
-        if (Math.Abs(trimmed.Length - length) > 1e-9 || trimmed.Start != part.Start || trimmed.End != part.End)
+        var trimmed = Trimmed(part, end, Math.Max(ClipRange.MinLength, length));
+        if (Math.Abs(trimmed.Length - part.Length) > 1e-9 || trimmed.Start != part.Start || trimmed.End != part.End)
             Change(() => _edit.Parts[index] = trimmed, join: $"trim {index} {end}");
         return _edit.Parts[index].Length;
     }

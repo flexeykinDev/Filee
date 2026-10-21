@@ -94,11 +94,11 @@ public class ClipProjectTests
         Assert.Equal(40, project.Starts()[1]);
         // The start 5 s in: 5 s less from the start, the part still starts the clip.
         project.Seal();
-        Assert.Equal(35, project.TrimEdge(0, end: false, 5));
+        Assert.Equal(35, project.TrimEdge(0, end: false, 35));
         Assert.Equal(25, project.Parts[0].Start);
         // Out past the video's start: as far as it goes.
         project.Seal();
-        project.TrimEdge(0, end: false, -100);
+        project.TrimEdge(0, end: false, 1000);
         Assert.Equal(0, project.Parts[0].Start);
         // One drag is one undo step.
         Assert.True(project.Undo());
@@ -129,7 +129,7 @@ public class ClipProjectTests
         Assert.Equal(142, project.Length);
         Assert.Equal((30.0, 30.0), (project.Parts[2].Start, still.SourceAt(1)));
         // Its edge sets how long it lasts.
-        project.TrimEdge(1, end: true, project.Starts()[1] + 5);
+        project.TrimEdge(1, end: true, 5);
         Assert.Equal(5, project.Parts[1].Length);
         // The blade cuts it in two stills.
         Assert.True(project.Split(project.Starts()[1] + 1));
