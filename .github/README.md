@@ -6,7 +6,7 @@
 </p>
 
 <p align="center">
-  <a href="https://github.com/flexeykinDev/Filee/releases/tag/private-1.12.0-2"><b>Скачать установщик</b></a> ·
+  <a href="https://github.com/flexeykinDev/Filee/releases/tag/private-1.12.0-3"><b>Скачать установщик</b></a> ·
   <a href="#clip"><b>Монтаж клипов</b></a> ·
   <a href="https://github.com/KnifeLemon/Filee"><b>Оригинальный Filee</b></a> ·
   <a href="#build">Собрать самому</a>
@@ -47,6 +47,8 @@
 - <kbd>C</kbd> — лезвие: режет кусок там, где стоит указатель.
 - <kbd>Delete</kbd> вырезает кусок и оставляет пустоту с кнопкой «Убрать пустоту»; <kbd>Shift</kbd>+<kbd>Delete</kbd>
   сразу сдвигает остальное. Вырезали лишнее — **потяните край куска**, и он развернётся обратно.
+- **Несколько кусков сразу:** протяните мышью по кускам, Ctrl+клик добавляет, Shift+клик — диапазон, Ctrl+A — все.
+  Delete, громкость, скорость и «Без звука» применяются ко всем выбранным.
 - **Звук отдельно:** на A1 у каждого куска своя громкость (тяните линию), <kbd>Delete</kbd> на A1 выключает звук куска,
   а картинка остаётся.
 - **Своя музыка:** кнопка «Музыка» кладёт звук из любого файла на A2; его можно двигать и менять громкость.
@@ -93,10 +95,10 @@
 <a id="install"></a>
 <img src="private/s-install.svg" alt="05 · Установка" width="100%">
 
-1. Скачайте `Filee-1.12.0-win-Setup.exe` со [страницы релиза](https://github.com/flexeykinDev/Filee/releases/tag/private-1.12.0-2)
+1. Скачайте `Filee-1.12.0-win-Setup.exe` со [страницы релиза](https://github.com/flexeykinDev/Filee/releases/tag/private-1.12.0-3)
    и сверьте хеш:
    ```powershell
-   Get-FileHash .\Filee-1.12.0-win-Setup.exe   # 53180192E06B96CACF849FE21174075FDEFF80F036973040CAF6598AF3735675
+   Get-FileHash .\Filee-1.12.0-win-Setup.exe   # FB54426A55A9108FF417FB8518ADCE5492E258B6427AED45F3500CE16C508C59
    ```
 2. Установщик не подписан, поэтому SmartScreen предупредит: «Подробнее» → «Выполнить в любом случае».
 3. Не соглашайтесь на обновление из официального Filee: оно заменит эту сборку.
