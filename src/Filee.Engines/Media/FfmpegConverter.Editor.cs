@@ -88,7 +88,13 @@ public sealed partial class FfmpegConverter
                 : await HardwareProbe.SelectAsync(ffmpeg, codec, false, encoders, _logger, cancellationToken);
         }
 
-        var work = Path.Combine(step.WorkDirectory, "texts");
+        // Texts need FFmpeg's drawtext (FreeType); a build without it writes the clip without them rather than not at all.
+        string? work = Path.Combine(step.WorkDirectory, "texts");
+        if (clip.Texts.Any(t => t.Rendered is null) && !HasFilter(ffmpeg, "drawtext"))
+        {
+            _logger.LogWarning("{File}: this FFmpeg has no drawtext filter; the clip is written without its texts", output);
+            work = null;
+        }
         async Task WriteAsync(ClipEdit edit)
         {
             IReadOnlyList<FfmpegPass> Plan(HardwareEncoder? encoder) =>

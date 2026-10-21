@@ -1,7 +1,8 @@
-// The clip window's editor (its second mode, CapCut-like in Filee's style): the videos and the music in Files, the
-// clip on a timeline of tracks (texts, pictures, the parts' sound, the music), the preview with the player, the
-// selection's properties, and the Export window. The editing itself is ClipProject; this keeps what is shown in step
-// with it, reads the videos (their pictures and loudness), plays the clip and starts the conversion that writes it.
+// The clip window's editor (its second mode, CapCut-like in Filee's style): the videos, sounds and pictures in Files,
+// the clip on a timeline of tracks (texts, pictures over the video, the parts, their sound, the sounds from other
+// files), the preview with the player, the selection's properties, right-click menus, and the Export window. The
+// editing itself is ClipProject; this keeps what is shown in step with it, reads the files (pictures, loudness), plays
+// the clip and starts the conversion that writes it.
 
 using System.Collections.ObjectModel;
 using System.Globalization;
@@ -12,6 +13,7 @@ using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 using Filee.App.Controls;
 using Filee.App.Services;
+using Filee.Core.Formats;
 using Filee.Core.Localization;
 using Filee.Core.Presets;
 using Filee.Core.Settings;
@@ -26,34 +28,48 @@ public enum EditorSelection
     None,
     Parts,
     Text,
-    Music,
+    Image,
+    Sound,
     Transition,
 }
 
-/// <summary>A video or a sound in the editor's Files.</summary>
-public sealed partial class EditorMedia(string path, bool isAudio) : ObservableObject
+/// <summary>What a file in Files is.</summary>
+public enum EditorMediaKind
+{
+    Video,
+    Sound,
+    Picture,
+}
+
+/// <summary>A video, a sound or a picture in the editor's Files.</summary>
+public sealed partial class EditorMedia(string path, EditorMediaKind kind) : ObservableObject
 {
     public string Path { get; } = path;
     public string Name => System.IO.Path.GetFileName(Path);
-    public bool IsAudio { get; } = isAudio;
-    public bool IsVideo => !IsAudio;
+    public EditorMediaKind Kind { get; } = kind;
+    public bool IsVideo => Kind == EditorMediaKind.Video;
+    public bool IsAudio => Kind == EditorMediaKind.Sound;
+    public bool IsPicture => Kind == EditorMediaKind.Picture;
+
+    /// <summary>A video's or picture's card shows its picture; a sound's, a note.</summary>
+    public bool HasPicture => !IsAudio;
 
     [ObservableProperty]
     [NotifyPropertyChangedFor(nameof(DurationText))]
     private double _duration;
 
-    /// <summary>"1920×1080 · 60 fps", or the kind of sound.</summary>
+    /// <summary>"1920×1080 · 60 fps", or the kind of file.</summary>
     [ObservableProperty] private string _details = "";
 
     [ObservableProperty] private Bitmap? _thumbnail;
 
-    /// <summary>On the timeline (a video) or under it (the music).</summary>
+    /// <summary>Used in the clip: on the timeline, as a sound, or over the video.</summary>
     [ObservableProperty] private bool _isUsed;
 
     /// <summary>Just dropped in: its card flies in.</summary>
     [ObservableProperty] private bool _justAdded;
 
-    public string DurationText => ClipRange.Display(Duration);
+    public string DurationText => IsPicture ? "" : ClipRange.Display(Duration);
 
     internal int Width { get; set; }
     internal int Height { get; set; }
@@ -65,6 +81,24 @@ public sealed partial class EditorMedia(string path, bool isAudio) : ObservableO
 
     /// <summary>The sound's loudness over the whole file.</summary>
     internal float[] Loudness { get; set; } = [];
+
+    /// <summary>A picture's own image, for the preview and the export (not the card's thumbnail: it is larger).</summary>
+    internal Bitmap? Image { get; set; }
+
+    /// <summary>Lets go of every picture it holds.</summary>
+    internal void Release()
+    {
+        foreach (var bitmap in Strip)
+            bitmap?.Dispose();
+        Strip = [];
+        if (!ReferenceEquals(Thumbnail, Image))
+            Image?.Dispose();
+        Image = null;
+        var thumbnail = Thumbnail;
+        Thumbnail = null;
+        if (IsPicture)
+            thumbnail?.Dispose();
+    }
 }
 
 public sealed partial class ClipEditorViewModel : ObservableObject, IEditorTimelineHost, IEditorPreviewHost, IDisposable
@@ -74,11 +108,20 @@ public sealed partial class ClipEditorViewModel : ObservableObject, IEditorTimel
 
     private const int StripHeight = 96;
 
-    /// <summary>Steps of a video's loudness drawn under its parts.</summary>
+    /// <summary>Steps of a file's loudness drawn under its parts or sound.</summary>
     private const int LoudnessSteps = 600;
 
     /// <summary>FFmpeg runs at the same time while pictures are taken.</summary>
     private const int ParallelPictures = 3;
+
+    /// <summary>A picture over the video is read no wider than this (a photo is often far larger than any frame).</summary>
+    private const int PictureWidth = 2048;
+
+    /// <summary>How long a picture over the video shows to start with, in seconds.</summary>
+    public const double PictureSeconds = 5;
+
+    /// <summary>The most sound tracks (A2 … A9).</summary>
+    public const int MaxSoundTracks = 8;
 
     /// <summary>How long a short message stays.</summary>
     private static readonly TimeSpan MessageTime = TimeSpan.FromSeconds(4);
@@ -97,6 +140,7 @@ public sealed partial class ClipEditorViewModel : ObservableObject, IEditorTimel
     private readonly CancellationTokenSource _life = new();
     private readonly List<int> _selectedParts = [];
     private List<ClipPart> _clipboard = [];
+    private ClipText? _textClipboard;
     private bool _syncing;
     private bool _closed;
 
@@ -117,24 +161,23 @@ public sealed partial class ClipEditorViewModel : ObservableObject, IEditorTimel
         _export = export;
         _workFolder = Path.Combine(workFolder, "editor");
         _log = log;
-        var media = new EditorMedia(_mainKey, isAudio: false);
+        var media = new EditorMedia(_mainKey, EditorMediaKind.Video);
         Describe(media, main);
         _media[_mainKey] = media;
         Files.Add(media);
-        var edit = start.Clone();
-        edit.Editor = true;
-        if (edit.Music is { } music && !_media.ContainsKey(Path.GetFullPath(music.Path)))
+        _project = new ClipProject(start, DurationOf);
+        foreach (var sound in _project.Sounds.Where(s => !_media.ContainsKey(Path.GetFullPath(s.Path))))
         {
-            var song = new EditorMedia(Path.GetFullPath(music.Path), isAudio: true) { Duration = music.Length, Details = _loc["editor.sound"] };
+            var song = new EditorMedia(Path.GetFullPath(sound.Path), EditorMediaKind.Sound) { Duration = sound.Length, Details = _loc["editor.sound"] };
             _media[song.Path] = song;
             Files.Add(song);
-            _ = LoadMusicLoudnessAsync(song.Path, music.Length);
+            _ = LoadLoudnessAsync(song, _life.Token);
         }
-        _project = new ClipProject(edit, DurationOf);
         _project.Changed += OnProjectChanged;
         LoadExportSettings();
         loc.LanguageChanged += OnLanguageChanged;
         Directory.CreateDirectory(_workFolder);
+        EditorLayers.CleanUp();
         _ = LoadPicturesAsync(media);
         _ = FindGpuAsync();
         Sync();
@@ -156,13 +199,19 @@ public sealed partial class ClipEditorViewModel : ObservableObject, IEditorTimel
     /// <summary>Files just added (their cards fly in, a check draws itself).</summary>
     public event Action<IReadOnlyList<EditorMedia>>? FilesAdded;
 
-    /// <summary>The videos and the sounds of the clip.</summary>
+    /// <summary>A file is to be shown in its folder (the platform does it).</summary>
+    public event Action<string>? RevealRequested;
+
+    /// <summary>The videos, sounds and pictures of the clip.</summary>
     public ObservableCollection<EditorMedia> Files { get; } = [];
 
     public ClipEdit Edit => _project.Edit;
     public IReadOnlyCollection<int> SelectedParts => _selectedParts;
     public string GapText => _loc["clip.close_gap"];
-    public string NoMusicText => _loc["clip.no_music_yet"];
+    public string NoSoundText => _loc["editor.no_sound_yet"];
+
+    /// <summary>The sound tracks in use and an empty one below them to drag a sound to.</summary>
+    public int SoundTracks => Math.Min(MaxSoundTracks, _project.Sounds.Count == 0 ? 1 : _project.SoundTracks + 1);
 
     /// <summary>The window's video, by name.</summary>
     public string Title => Path.GetFileName(_main);
@@ -182,18 +231,20 @@ public sealed partial class ClipEditorViewModel : ObservableObject, IEditorTimel
     [ObservableProperty]
     [NotifyPropertyChangedFor(nameof(HasPartSelection))]
     [NotifyPropertyChangedFor(nameof(HasTextSelection))]
-    [NotifyPropertyChangedFor(nameof(HasMusicSelection))]
+    [NotifyPropertyChangedFor(nameof(HasImageSelection))]
+    [NotifyPropertyChangedFor(nameof(HasSoundSelection))]
     [NotifyPropertyChangedFor(nameof(HasTransitionSection))]
     [NotifyPropertyChangedFor(nameof(HasNoSelection))]
-    [NotifyPropertyChangedFor(nameof(IsMusicSelected))]
     private EditorSelection _selection;
 
     [ObservableProperty] private int _selectedText = -1;
+    [ObservableProperty] private int _selectedImage = -1;
+    [ObservableProperty] private int _selectedSound = -1;
     [ObservableProperty] private int _selectedTransition = -1;
     [ObservableProperty] private bool _canUndo;
     [ObservableProperty] private bool _canRedo;
     [ObservableProperty] private bool _hasGaps;
-    [ObservableProperty] private bool _hasMusic;
+    [ObservableProperty] private bool _hasSounds;
 
     [ObservableProperty]
     [NotifyPropertyChangedFor(nameof(PlayToolTip))]
@@ -248,10 +299,10 @@ public sealed partial class ClipEditorViewModel : ObservableObject, IEditorTimel
     public bool ShowFiles => !IsNarrow || IsFilesOpen;
     public bool ShowProperties => !IsNarrow || IsPropertiesOpen;
     public bool HasPartSelection => Selection == EditorSelection.Parts && _selectedParts.Count > 0;
-    public bool HasTextSelection => Selection == EditorSelection.Text && SelectedText >= 0;
-    public bool HasMusicSelection => Selection == EditorSelection.Music && HasMusic;
+    public bool HasTextSelection => Selection == EditorSelection.Text && SelectedText >= 0 && SelectedText < _project.Texts.Count;
+    public bool HasImageSelection => Selection == EditorSelection.Image && SelectedImage >= 0 && SelectedImage < _project.Images.Count;
+    public bool HasSoundSelection => Selection == EditorSelection.Sound && SelectedSound >= 0 && SelectedSound < _project.Sounds.Count;
     public bool HasNoSelection => Selection == EditorSelection.None || Selection == EditorSelection.Parts && _selectedParts.Count == 0;
-    public bool IsMusicSelected => Selection == EditorSelection.Music;
     public bool HasMessage => !string.IsNullOrEmpty(Message);
     public bool IsBusy => IsBuffering || IsFindingSilence || Reading > 0;
     public string BusyText => IsBuffering ? _loc["clip.preparing"]
@@ -263,26 +314,37 @@ public sealed partial class ClipEditorViewModel : ObservableObject, IEditorTimel
     public string LengthText => ClipRange.Display(Length);
     public string PlayToolTip => _loc[IsPlaying ? "clip.pause" : "clip.play"] + " (Space, K)";
 
-    /// <summary>What the properties are of: "Part 2 of 5", "Text", "Music", "Transition", "Clip".</summary>
+    /// <summary>What the properties are of: "Part 2 of 5", "Text", "Picture", "Sound", "Transition", "Clip".</summary>
     public string SelectionTitle => Selection switch
     {
         EditorSelection.Parts when _selectedParts.Count > 1 => _loc.Format("clip.selected_count", _selectedParts.Count),
         EditorSelection.Parts when _selectedParts.Count == 1 => _loc.Format("editor.part_of", _selectedParts[0] + 1, _project.Parts.Count),
         EditorSelection.Text => _loc["editor.text"],
-        EditorSelection.Music => _loc["editor.music"],
+        EditorSelection.Image => _loc["editor.picture"],
+        EditorSelection.Sound => _loc["editor.sound"],
         EditorSelection.Transition => _loc.Format("editor.transition_between", SelectedTransition + 1, SelectedTransition + 2),
         _ => _loc["editor.clip"],
     };
 
+    /// <summary>The selected text, picture, sound or transition, for the timeline (null: parts or nothing).</summary>
+    public EditorItem? SelectedItem => Selection switch
+    {
+        EditorSelection.Text when SelectedText >= 0 => new EditorItem(EditorItemKind.Text, SelectedText),
+        EditorSelection.Image when SelectedImage >= 0 => new EditorItem(EditorItemKind.Image, SelectedImage),
+        EditorSelection.Sound when SelectedSound >= 0 => new EditorItem(EditorItemKind.Sound, SelectedSound),
+        EditorSelection.Transition when SelectedTransition >= 0 => new EditorItem(EditorItemKind.Transition, SelectedTransition),
+        _ => null,
+    };
+
     // ───────────────────────── Files ─────────────────────────
 
-    /// <summary>How long the video <paramref name="source"/> is (null: the window's video).</summary>
+    /// <summary>How long the video or sound <paramref name="source"/> is (null: the window's video).</summary>
     public double DurationOf(string? source) => MediaOf(source)?.Duration ?? 0;
 
     private EditorMedia? MediaOf(string? source) =>
         _media.TryGetValue(source is null ? _mainKey : Path.GetFullPath(source), out var media) ? media : null;
 
-    /// <summary>The part's video: null for the window's own, else its full path.</summary>
+    /// <summary>How the parts name a video: null for the window's own, else its full path.</summary>
     private string? SourceKey(string path) => string.Equals(Path.GetFullPath(path), _mainKey, StringComparison.OrdinalIgnoreCase) ? null : Path.GetFullPath(path);
 
     private void Describe(EditorMedia media, VideoSummary video)
@@ -296,9 +358,9 @@ public sealed partial class ClipEditorViewModel : ObservableObject, IEditorTimel
     }
 
     /// <summary>
-    /// Adds files to Files: videos and sounds (anything else is skipped with a message). With
+    /// Adds files to Files: videos, sounds and pictures (anything else is skipped with a message). With
     /// <paramref name="toTimeline"/> the videos also go on the timeline (at part <paramref name="at"/>, else at the
-    /// end) and a sound becomes the music. Returns the files added.
+    /// end), the sounds one after another on A2, the pictures over the video at the playhead. Returns the files added.
     /// </summary>
     public async Task<IReadOnlyList<EditorMedia>> AddFilesAsync(IReadOnlyList<string> paths, bool toTimeline, int? at = null)
     {
@@ -318,7 +380,10 @@ public sealed partial class ClipEditorViewModel : ObservableObject, IEditorTimel
                 }
                 var media = await ReadMediaAsync(full);
                 if (_closed)
+                {
+                    media?.Release();
                     return added;
+                }
                 if (media is null)
                 {
                     failed++;
@@ -331,6 +396,8 @@ public sealed partial class ClipEditorViewModel : ObservableObject, IEditorTimel
                 ready.Add(media);
                 if (media.IsVideo)
                     _ = LoadPicturesAsync(media);
+                else if (media.IsAudio)
+                    _ = LoadLoudnessAsync(media, _life.Token);
             }
         }
         finally
@@ -350,16 +417,18 @@ public sealed partial class ClipEditorViewModel : ObservableObject, IEditorTimel
 
     private async Task<EditorMedia?> ReadMediaAsync(string path)
     {
-        // A file known to be something else (a document, a picture) isn't read at all.
-        if (Filee.Core.Formats.FormatRegistry.Detect(path)?.Category is { } category
-            && category is not (Filee.Core.Formats.FormatCategory.Video or Filee.Core.Formats.FormatCategory.Audio))
+        var category = FormatRegistry.Detect(path)?.Category;
+        if (category == FormatCategory.Image)
+            return ReadPicture(path);
+        // A file known to be something else (a document, an archive) isn't read at all.
+        if (category is { } other && other is not (FormatCategory.Video or FormatCategory.Audio))
             return null;
         try
         {
             var video = await _frames.ProbeAsync(path, _life.Token);
             if (video.Duration > 0)
             {
-                var media = new EditorMedia(path, isAudio: false);
+                var media = new EditorMedia(path, EditorMediaKind.Video);
                 Describe(media, video);
                 return media;
             }
@@ -372,7 +441,7 @@ public sealed partial class ClipEditorViewModel : ObservableObject, IEditorTimel
         {
             var length = await _frames.ReadSoundLengthAsync(path, _life.Token);
             if (length > 0)
-                return new EditorMedia(path, isAudio: true) { Duration = length, Details = _loc["editor.sound"] };
+                return new EditorMedia(path, EditorMediaKind.Sound) { Duration = length, Details = _loc["editor.sound"] };
         }
         catch (Exception ex) when (ex is not OutOfMemoryException and not OperationCanceledException)
         {
@@ -381,30 +450,117 @@ public sealed partial class ClipEditorViewModel : ObservableObject, IEditorTimel
         return null;
     }
 
-    /// <summary>Puts videos on the timeline (one undo step) and a sound under it as the music.</summary>
+    /// <summary>A picture file, read no wider than <see cref="PictureWidth"/>; null when it can't be read.</summary>
+    private EditorMedia? ReadPicture(string path)
+    {
+        try
+        {
+            using var stream = File.OpenRead(path);
+            var bitmap = Bitmap.DecodeToWidth(stream, PictureWidth, BitmapInterpolationMode.HighQuality);
+            if (bitmap.PixelSize.Width > PictureWidth)
+                bitmap = Swap(bitmap, bitmap.CreateScaledBitmap(new Avalonia.PixelSize(PictureWidth,
+                    Math.Max(1, (int)Math.Round((double)bitmap.PixelSize.Height * PictureWidth / bitmap.PixelSize.Width)))));
+            return new EditorMedia(path, EditorMediaKind.Picture)
+            {
+                Image = bitmap,
+                Thumbnail = bitmap,
+                Width = bitmap.PixelSize.Width,
+                Height = bitmap.PixelSize.Height,
+                Details = $"{_loc["editor.picture"]} · {bitmap.PixelSize.Width}×{bitmap.PixelSize.Height}",
+            };
+        }
+        catch (Exception ex) when (ex is not OutOfMemoryException)
+        {
+            _log?.LogDebug(ex, "{File} is not a picture the editor can read", path);
+            return null;
+        }
+
+        static Bitmap Swap(Bitmap old, Bitmap scaled)
+        {
+            old.Dispose();
+            return scaled;
+        }
+    }
+
+    /// <summary>Puts videos on the timeline, sounds on A2 one after another and pictures over the video (one undo step).</summary>
     private void PutOnTimeline(IReadOnlyList<EditorMedia> media, int? at)
     {
         StopPlaying();
-        var videos = media.Where(m => m.IsVideo).ToList();
-        var sound = media.FirstOrDefault(m => m.IsAudio);
+        var start = Playhead;
         _project.Batch(() =>
         {
             var index = Math.Clamp(at ?? _project.Parts.Count, 0, _project.Parts.Count);
-            foreach (var video in videos)
-                _project.AddVideo(SourceKey(video.Path), index++);
-            if (sound is not null)
-                _project.SetMusic(new ClipMusic { Path = sound.Path, Length = sound.Duration, Offset = 0 });
+            foreach (var item in media)
+            {
+                switch (item.Kind)
+                {
+                    case EditorMediaKind.Video:
+                        _project.AddVideo(SourceKey(item.Path), index++);
+                        break;
+                    case EditorMediaKind.Sound:
+                        _project.AddSound(item.Path, item.Duration);
+                        break;
+                    case EditorMediaKind.Picture:
+                        _project.AddImage(new ClipImage { Path = item.Path, Start = start, Length = PictureSeconds });
+                        break;
+                }
+            }
         });
-        if (sound is not null)
-            _ = LoadMusicLoudnessAsync(sound.Path, sound.Duration);
     }
 
-    /// <summary>A card's "+" or a double click: a video to the end of the timeline, a sound as the music.</summary>
+    /// <summary>A card's "+" or a double click: a video after the part at the playhead, a sound on A2, a picture at the playhead.</summary>
     [RelayCommand]
     public void UseMedia(EditorMedia? media)
     {
         if (media is not null)
             PutOnTimeline([media], media.IsVideo ? _project.IndexAt(Playhead) + 1 : null);
+    }
+
+    /// <summary>
+    /// Takes a file out of the project: its card, and its parts, sounds and pictures in the clip (Undo brings them and
+    /// the card back: what was read of the file stays until the editor closes). Refused when nothing of the video would
+    /// be left to play.
+    /// </summary>
+    [RelayCommand]
+    public void RemoveMedia(EditorMedia? media)
+    {
+        if (media is null)
+            return;
+        StopPlaying();
+        var used = media.IsUsed;
+        if (used && !_project.RemoveFile(media.Path, media.IsVideo ? SourceKey(media.Path) : "\0"))
+        {
+            ShowMessage(_loc["editor.cannot_remove_file"]);
+            return;
+        }
+        Files.Remove(media);
+        ClearSelection();
+    }
+
+    [RelayCommand]
+    private void RevealMedia(EditorMedia? media)
+    {
+        if (media is not null)
+            RevealRequested?.Invoke(media.Path);
+    }
+
+    /// <summary>The right-click menu of a card in Files.</summary>
+    public IReadOnlyList<EditorMenuItem> MenuForMedia(EditorMedia media) =>
+    [
+        new(_loc[media.IsAudio ? "editor.menu_add_sound" : media.IsPicture ? "editor.menu_add_picture" : "editor.menu_add_video"], () => UseMedia(media)),
+        .. media.IsAudio
+            ? new[] { new EditorMenuItem(_loc["editor.menu_new_track"], () => AddSoundOnNewTrack(media)) }
+            : [],
+        new(_loc["editor.menu_reveal"], () => RevealMedia(media)),
+        EditorMenuItem.Separator,
+        new(_loc["editor.menu_remove_file"], () => RemoveMedia(media)),
+    ];
+
+    private void AddSoundOnNewTrack(EditorMedia media)
+    {
+        StopPlaying();
+        var track = Math.Min(MaxSoundTracks - 1, _project.Sounds.Count == 0 ? 0 : _project.SoundTracks);
+        Select(new EditorItem(EditorItemKind.Sound, _project.AddSound(media.Path, media.Duration, track, Playhead)));
     }
 
     /// <summary>The pictures and the loudness of a video, a few at a time, each shown as soon as it is there.</summary>
@@ -436,8 +592,15 @@ public sealed partial class ClipEditorViewModel : ObservableObject, IEditorTimel
             {
                 gate.Release();
             }
-            if (file is null || ct.IsCancellationRequested || _closed || Load(file) is not { } bitmap)
+            if (file is null || Load(file) is not { } bitmap)
                 return;
+            TryDelete(file);
+            // The file may have left the project (or the editor closed) meanwhile.
+            if (ct.IsCancellationRequested || _closed || media.Strip.Length != StripCount)
+            {
+                bitmap.Dispose();
+                return;
+            }
             media.Strip[i] = bitmap;
             media.Thumbnail ??= bitmap;
             TimelineChanged?.Invoke();
@@ -456,7 +619,7 @@ public sealed partial class ClipEditorViewModel : ObservableObject, IEditorTimel
 
     private async Task LoadLoudnessAsync(EditorMedia media, CancellationToken ct)
     {
-        if (!media.HasAudio)
+        if (media.IsVideo && !media.HasAudio)
             return;
         try
         {
@@ -466,21 +629,6 @@ public sealed partial class ClipEditorViewModel : ObservableObject, IEditorTimel
         catch (Exception ex) when (ex is not OutOfMemoryException)
         {
             _log?.LogDebug(ex, "No loudness of {File}", media.Path);
-        }
-    }
-
-    private async Task LoadMusicLoudnessAsync(string path, double length)
-    {
-        try
-        {
-            var loudness = await _frames.ReadLoudnessAsync(path, 0, length, LoudnessSteps, _workFolder, _life.Token);
-            if (_media.TryGetValue(Path.GetFullPath(path), out var media))
-                media.Loudness = loudness;
-            TimelineChanged?.Invoke();
-        }
-        catch (Exception ex) when (ex is not OutOfMemoryException)
-        {
-            _log?.LogDebug(ex, "No loudness of the music {File}", path);
         }
     }
 
@@ -500,19 +648,22 @@ public sealed partial class ClipEditorViewModel : ObservableObject, IEditorTimel
         return null;
     }
 
-    public IReadOnlyList<float> LoudnessOf(string? source) => MediaOf(source)?.Loudness ?? [];
+    public Bitmap? ImageOf(string path) => _media.TryGetValue(Path.GetFullPath(path), out var media) ? media.Image : null;
 
-    public IReadOnlyList<float> MusicLoudness =>
-        _project.Music is { } music && _media.TryGetValue(Path.GetFullPath(music.Path), out var media) ? media.Loudness : [];
+    public IReadOnlyList<float> LoudnessOf(string? source) => MediaOf(source)?.Loudness ?? [];
 
     // ───────────────────────── After each change ─────────────────────────
 
     private void OnProjectChanged()
     {
-        // Indices past the end after parts went away.
+        // Indices past the end after things went away.
         _selectedParts.RemoveAll(i => i >= _project.Parts.Count);
         if (SelectedText >= _project.Texts.Count)
             SelectedText = -1;
+        if (SelectedImage >= _project.Images.Count)
+            SelectedImage = -1;
+        if (SelectedSound >= _project.Sounds.Count)
+            SelectedSound = -1;
         if (SelectedTransition >= _project.Parts.Count - 1)
             SelectedTransition = -1;
         Sync();
@@ -531,13 +682,21 @@ public sealed partial class ClipEditorViewModel : ObservableObject, IEditorTimel
             CanUndo = _project.CanUndo;
             CanRedo = _project.CanRedo;
             HasGaps = _project.HasGaps;
-            HasMusic = _project.Music is not null;
-            if (Selection == EditorSelection.Music && !HasMusic)
+            HasSounds = _project.Sounds.Count > 0;
+            if (Selection is EditorSelection.Text or EditorSelection.Image or EditorSelection.Sound or EditorSelection.Transition && SelectedItem is null)
                 Selection = EditorSelection.None;
-            foreach (var media in Files)
-                media.IsUsed = media.IsVideo
-                    ? _project.Parts.Any(p => !p.Blank && string.Equals(p.Source ?? _mainKey, media.Path, StringComparison.OrdinalIgnoreCase))
-                    : _project.Music is { } music && string.Equals(Path.GetFullPath(music.Path), media.Path, StringComparison.OrdinalIgnoreCase);
+            foreach (var media in _media.Values)
+            {
+                media.IsUsed = media.Kind switch
+                {
+                    EditorMediaKind.Video => _project.Parts.Any(p => !p.Blank && string.Equals(p.Source ?? _mainKey, media.Path, StringComparison.OrdinalIgnoreCase)),
+                    EditorMediaKind.Sound => _project.Sounds.Any(s => string.Equals(Path.GetFullPath(s.Path), media.Path, StringComparison.OrdinalIgnoreCase)),
+                    _ => _project.Images.Any(i => string.Equals(Path.GetFullPath(i.Path), media.Path, StringComparison.OrdinalIgnoreCase)),
+                };
+                // A file taken out of the project and brought back by Undo gets its card back.
+                if (media.IsUsed && !Files.Contains(media))
+                    Files.Add(media);
+            }
             UpdateSelectionDetail();
             foreach (var name in PropertyNames)
                 OnPropertyChanged(name);
@@ -556,9 +715,11 @@ public sealed partial class ClipEditorViewModel : ObservableObject, IEditorTimel
         {
             EditorSelection.Parts when _selectedParts.Count == 1 && _selectedParts[0] < _project.Parts.Count
                 => PartDetail(_project.Parts[_selectedParts[0]]),
-            EditorSelection.Text when SelectedText >= 0 && SelectedText < _project.Texts.Count
+            EditorSelection.Text when HasTextSelection
                 => $"{ClipRange.Display(_project.Texts[SelectedText].Start)} · {ClipRange.Display(_project.Texts[SelectedText].Length)}",
-            EditorSelection.Music when _project.Music is { } music => Path.GetFileName(music.Path),
+            EditorSelection.Image when HasImageSelection => Path.GetFileName(_project.Images[SelectedImage].Path),
+            EditorSelection.Sound when HasSoundSelection
+                => $"{Path.GetFileName(_project.Sounds[SelectedSound].Path)} · A{_project.Sounds[SelectedSound].Track + 2}",
             EditorSelection.None or EditorSelection.Parts => $"{_project.Parts.Count(p => !p.Blank)} · {LengthText}",
             _ => "",
         };
@@ -600,27 +761,34 @@ public sealed partial class ClipEditorViewModel : ObservableObject, IEditorTimel
         SetSelection(EditorSelection.Parts);
     }
 
-    public void SelectText(int index)
+    /// <summary>Selects a text, a picture, a sound, a transition or (one) part.</summary>
+    public void Select(EditorItem item)
     {
-        if (index < 0 || index >= _project.Texts.Count)
-            return;
-        SelectedText = index;
-        SetSelection(EditorSelection.Text);
+        switch (item.Kind)
+        {
+            case EditorItemKind.Part:
+                SelectPart(item.Index, ClipSelect.Only);
+                break;
+            case EditorItemKind.Text when item.Index >= 0 && item.Index < _project.Texts.Count:
+                SelectedText = item.Index;
+                SetSelection(EditorSelection.Text);
+                break;
+            case EditorItemKind.Image when item.Index >= 0 && item.Index < _project.Images.Count:
+                SelectedImage = item.Index;
+                SetSelection(EditorSelection.Image);
+                break;
+            case EditorItemKind.Sound when item.Index >= 0 && item.Index < _project.Sounds.Count:
+                SelectedSound = item.Index;
+                SetSelection(EditorSelection.Sound);
+                break;
+            case EditorItemKind.Transition when item.Index >= 0 && item.Index < _project.Parts.Count - 1:
+                SelectedTransition = item.Index;
+                SetSelection(EditorSelection.Transition);
+                break;
+        }
     }
 
-    public void SelectMusic()
-    {
-        if (HasMusic)
-            SetSelection(EditorSelection.Music);
-    }
-
-    public void SelectTransition(int index)
-    {
-        if (index < 0 || index >= _project.Parts.Count - 1)
-            return;
-        SelectedTransition = index;
-        SetSelection(EditorSelection.Transition);
-    }
+    public void SelectText(int index) => Select(new EditorItem(EditorItemKind.Text, index));
 
     [RelayCommand]
     public void ClearSelection()
@@ -641,6 +809,10 @@ public sealed partial class ClipEditorViewModel : ObservableObject, IEditorTimel
     {
         if (selection != EditorSelection.Text)
             SelectedText = -1;
+        if (selection != EditorSelection.Image)
+            SelectedImage = -1;
+        if (selection != EditorSelection.Sound)
+            SelectedSound = -1;
         if (selection != EditorSelection.Transition)
             SelectedTransition = -1;
         if (selection != EditorSelection.Parts)
@@ -653,6 +825,9 @@ public sealed partial class ClipEditorViewModel : ObservableObject, IEditorTimel
             foreach (var name in PropertyNames)
                 OnPropertyChanged(name);
             OnPropertyChanged(nameof(HasPartSelection));
+            OnPropertyChanged(nameof(HasTextSelection));
+            OnPropertyChanged(nameof(HasImageSelection));
+            OnPropertyChanged(nameof(HasSoundSelection));
             OnPropertyChanged(nameof(HasNoSelection));
             OnPropertyChanged(nameof(HasTransitionSection));
         }
@@ -703,17 +878,41 @@ public sealed partial class ClipEditorViewModel : ObservableObject, IEditorTimel
         RefreshPreview(immediately: false);
     }
 
-    public void MoveText(int index, double start) =>
-        _project.ChangeText(index, t => t.Start = start, join: $"text move {index}");
-
-    public void ResizeText(int index, double start, double length) =>
-        _project.ChangeText(index, t =>
+    public void PlaceItem(EditorItem item, double start, double length)
+    {
+        switch (item.Kind)
         {
-            t.Start = start;
-            t.Length = length;
-        }, join: $"text size {index}");
+            case EditorItemKind.Text:
+                _project.ChangeText(item.Index, t =>
+                {
+                    t.Start = start;
+                    t.Length = length;
+                }, join: $"text place {item.Index}");
+                break;
+            case EditorItemKind.Image:
+                _project.ChangeImage(item.Index, i =>
+                {
+                    i.Start = start;
+                    i.Length = length;
+                }, join: $"image place {item.Index}");
+                break;
+        }
+    }
 
-    public void MoveMusic(double offset) => _project.ChangeMusic(m => m.Offset = offset, join: "music move");
+    public void MoveSound(int index, double offset, int track) =>
+        _project.ChangeSound(index, s =>
+        {
+            s.Offset = offset;
+            s.Track = Math.Clamp(track, 0, MaxSoundTracks - 1);
+        }, join: $"sound move {index}");
+
+    public void TrimSound(int index, double offset, double from, double play) =>
+        _project.ChangeSound(index, s =>
+        {
+            s.Offset = offset;
+            s.From = from;
+            s.Play = play;
+        }, join: $"sound trim {index}");
 
     public void SetPartVolume(int index, double volume)
     {
@@ -725,7 +924,7 @@ public sealed partial class ClipEditorViewModel : ObservableObject, IEditorTimel
         }, join: "volume line");
     }
 
-    public void SetMusicVolume(double volume) => _project.ChangeMusic(m => m.Volume = volume, join: "music volume line");
+    public void SetSoundVolume(int index, double volume) => _project.ChangeSound(index, s => s.Volume = volume, join: $"sound volume {index}");
 
     public void CloseGap(int index) => _project.CloseGap(index);
 
@@ -744,18 +943,22 @@ public sealed partial class ClipEditorViewModel : ObservableObject, IEditorTimel
             ShowMessage(_loc["clip.cannot_cut"]);
     }
 
-    /// <summary>Delete: parts leave a gap (Shift: what follows closes up); a text, the music or a transition goes.</summary>
+    /// <summary>Delete: parts leave a gap (Shift: what follows closes up); a text, a picture, a sound or a transition goes.</summary>
     public void Delete(bool closeUp)
     {
         StopPlaying();
         switch (Selection)
         {
-            case EditorSelection.Text when SelectedText >= 0:
+            case EditorSelection.Text when HasTextSelection:
                 _project.RemoveTexts([SelectedText]);
                 ClearSelection();
                 return;
-            case EditorSelection.Music:
-                _project.SetMusic(null);
+            case EditorSelection.Image when HasImageSelection:
+                _project.RemoveImages([SelectedImage]);
+                ClearSelection();
+                return;
+            case EditorSelection.Sound when HasSoundSelection:
+                _project.RemoveSounds([SelectedSound]);
                 ClearSelection();
                 return;
             case EditorSelection.Transition when SelectedTransition >= 0:
@@ -788,11 +991,11 @@ public sealed partial class ClipEditorViewModel : ObservableObject, IEditorTimel
     [RelayCommand]
     public void CloseGaps() => _project.CloseGaps();
 
-    /// <summary>Ctrl+C: the selected parts (or the one at the playhead) are kept to paste.</summary>
+    /// <summary>Ctrl+C: the selected parts (or the one at the playhead), or the selected text, are kept to paste.</summary>
     [RelayCommand]
     public void Copy()
     {
-        if (Selection == EditorSelection.Text && SelectedText >= 0)
+        if (HasTextSelection)
         {
             _textClipboard = _project.Texts[SelectedText].Clone();
             _clipboard = [];
@@ -801,8 +1004,6 @@ public sealed partial class ClipEditorViewModel : ObservableObject, IEditorTimel
         _textClipboard = null;
         _clipboard = TargetParts.Select(i => _project.Parts[i].Clone()).ToList();
     }
-
-    private ClipText? _textClipboard;
 
     /// <summary>Ctrl+V: what was copied goes in after the part at the playhead (a text, at the playhead).</summary>
     [RelayCommand]
@@ -823,16 +1024,37 @@ public sealed partial class ClipEditorViewModel : ObservableObject, IEditorTimel
         SelectRange(first, _clipboard.Count);
     }
 
-    /// <summary>Ctrl+D: copies of the selected parts right after them.</summary>
+    /// <summary>Ctrl+D: copies of the selected parts right after them (of a text, a picture or a sound, right after it).</summary>
     [RelayCommand]
     public void Duplicate()
     {
         StopPlaying();
-        if (Selection == EditorSelection.Text && SelectedText >= 0)
+        if (HasTextSelection)
         {
             var copy = _project.Texts[SelectedText].Clone();
             copy.Start = Math.Min(Length - ClipRange.MinLength, copy.Start + copy.Length);
             SelectText(_project.AddText(copy));
+            return;
+        }
+        if (HasImageSelection)
+        {
+            var copy = _project.Images[SelectedImage].Clone();
+            copy.Start = Math.Min(Length - ClipRange.MinLength, copy.Start + copy.Length);
+            Select(new EditorItem(EditorItemKind.Image, _project.AddImage(copy)));
+            return;
+        }
+        if (HasSoundSelection)
+        {
+            var sound = _project.Sounds[SelectedSound];
+            var index = _project.AddSound(sound.Path, sound.Length, sound.Track, sound.Offset + sound.PlayLength(Length));
+            _project.ChangeSound(index, s =>
+            {
+                s.From = sound.From;
+                s.Play = sound.Play;
+                s.Volume = sound.Volume;
+                s.Fade = sound.Fade;
+            });
+            Select(new EditorItem(EditorItemKind.Sound, index));
             return;
         }
         var targets = TargetParts;
@@ -861,11 +1083,7 @@ public sealed partial class ClipEditorViewModel : ObservableObject, IEditorTimel
         if (index < 0)
             ShowMessage(_loc["editor.cannot_freeze"]);
         else
-        {
-            _selectedParts.Clear();
-            _selectedParts.Add(index);
-            SetSelection(EditorSelection.Parts);
-        }
+            SelectRange(index, 1);
     }
 
     /// <summary>The selected parts play backwards (again: forwards).</summary>
@@ -877,6 +1095,19 @@ public sealed partial class ClipEditorViewModel : ObservableObject, IEditorTimel
             return;
         var reverse = !_project.Parts[targets[0]].Reverse;
         _project.ChangeParts(targets, p => p.Reverse = reverse);
+    }
+
+    /// <summary>A quarter turn clockwise of what is selected: parts, a text or a picture.</summary>
+    [RelayCommand]
+    public void TurnRight()
+    {
+        StopPlaying();
+        if (HasTextSelection)
+            _project.ChangeText(SelectedText, t => t.Rotation += 90);
+        else if (HasImageSelection)
+            _project.ChangeImage(SelectedImage, i => i.Rotation += 90);
+        else if (TargetParts.Where(i => !_project.Parts[i].Blank).ToList() is { Count: > 0 } targets)
+            _project.ChangeParts(targets, p => p.Rotation += 90);
     }
 
     /// <summary>A text of a style at the playhead, selected for typing.</summary>
@@ -1010,6 +1241,7 @@ public sealed partial class ClipEditorViewModel : ObservableObject, IEditorTimel
         }
         catch (OperationCanceledException)
         {
+            return;
         }
         if (Message == text)
             Message = "";
@@ -1043,6 +1275,8 @@ public sealed partial class ClipEditorViewModel : ObservableObject, IEditorTimel
     {
         Dispatcher.UIThread.Post(() =>
         {
+            if (_closed)
+                return;
             foreach (var media in Files.Where(m => m.IsAudio))
                 media.Details = _loc["editor.sound"];
             BuildChoices();
@@ -1063,14 +1297,13 @@ public sealed partial class ClipEditorViewModel : ObservableObject, IEditorTimel
         _previewCts?.Cancel();
         _loc.LanguageChanged -= OnLanguageChanged;
         _project.Changed -= OnProjectChanged;
+        TimelineChanged = null;
+        PreviewChanged = null;
         DisposePictures();
-        foreach (var media in Files)
-        {
-            foreach (var bitmap in media.Strip)
-                bitmap?.Dispose();
-            media.Strip = [];
-            media.Thumbnail = null;
-        }
-        _life.Dispose();
+        foreach (var media in _media.Values)
+            media.Release();
+        _media.Clear();
+        Files.Clear();
+        // _life is cancelled, not disposed: work still finishing may ask for its token.
     }
 }

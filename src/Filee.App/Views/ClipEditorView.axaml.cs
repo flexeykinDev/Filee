@@ -5,6 +5,7 @@ using Avalonia.Interactivity;
 using Avalonia.Layout;
 using Avalonia.Platform.Storage;
 using Avalonia.Threading;
+using Filee.App.Controls;
 using Filee.App.Services;
 using Filee.App.ViewModels;
 
@@ -45,6 +46,14 @@ public partial class ClipEditorView : UserControl
             if (e.Source is StyledElement { DataContext: EditorMedia media })
                 _vm?.UseMedia(media);
         };
+        // A card's menu: put it in, show it in its folder, take it out of the project.
+        FilesList.ContextRequested += (_, e) =>
+        {
+            if (_vm is not { } vm || e.Source is not Control { DataContext: EditorMedia media } source)
+                return;
+            EditorMenus.Build(vm.MenuForMedia(media)).Open(source);
+            e.Handled = true;
+        };
         DragDrop.AddDragEnterHandler(this, OnDragEnter);
         DragDrop.AddDragOverHandler(this, OnDragOver);
         DragDrop.AddDragLeaveHandler(this, (_, _) => DropGlow.Classes.Remove("on"));
@@ -61,6 +70,7 @@ public partial class ClipEditorView : UserControl
         {
             _vm.PropertyChanged -= OnViewModelChanged;
             _vm.FilesAdded -= OnFilesAdded;
+            _vm.RevealRequested -= OnRevealRequested;
             _vm.TextEditRequested -= OnTextEditRequested;
         }
         _vm = DataContext as ClipEditorViewModel;
@@ -68,6 +78,7 @@ public partial class ClipEditorView : UserControl
         {
             _vm.PropertyChanged += OnViewModelChanged;
             _vm.FilesAdded += OnFilesAdded;
+            _vm.RevealRequested += OnRevealRequested;
             _vm.TextEditRequested += OnTextEditRequested;
             Lay();
         }
@@ -263,12 +274,13 @@ public partial class ClipEditorView : UserControl
                 AllowMultiple = true,
                 FileTypeFilter =
                 [
-                    new FilePickerFileType("Video, audio")
+                    new FilePickerFileType("Video, audio, pictures")
                     {
                         Patterns =
                         [
                             "*.mp4", "*.mov", "*.mkv", "*.webm", "*.avi", "*.m4v", "*.wmv", "*.flv", "*.ts", "*.mts", "*.3gp",
                             "*.mp3", "*.m4a", "*.aac", "*.wav", "*.flac", "*.ogg", "*.opus", "*.wma",
+                            "*.png", "*.jpg", "*.jpeg", "*.webp", "*.bmp", "*.gif",
                         ],
                     },
                     FilePickerFileTypes.All,
@@ -339,6 +351,19 @@ public partial class ClipEditorView : UserControl
             foreach (var media in added)
                 media.JustAdded = false;
         }, TimeSpan.FromSeconds(1.7));
+    }
+
+    private static void OnRevealRequested(string path)
+    {
+        try
+        {
+            AppHost.Get<Filee.Core.Platform.IPlatformServices>().RevealInFileManager(path);
+        }
+        catch (Exception ex) when (ex is not OutOfMemoryException)
+        {
+            // No file manager here (a test): nothing to show.
+            System.Diagnostics.Debug.WriteLine(ex);
+        }
     }
 
     private void OnTextEditRequested() =>

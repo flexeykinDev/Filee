@@ -1,18 +1,19 @@
-// The editor's preview: the clip's frame (its shape, as large as fits), the picture in it placed as the conversion will
-// place it (fitted with bars, cropped, or over a blurred copy of itself; closer and moved by the part's zoom and focus),
-// and the texts drawn over it in their styles. Texts are dragged where they go; with a part selected whose picture is
-// larger than the frame, the picture is dragged to choose what is shown. A double click fills the window.
+// The editor's preview: the clip's frame (its shape, as large as fits) with the part's picture placed as the conversion
+// will place it, the pictures and texts over it. What is selected has a frame with handles: dragged inside it moves,
+// its corners size it, the round handle above turns it (snapping to the quarter turns). A click on the picture selects
+// the part shown, on a text or a picture that one; a right click opens its menu; a double click fills the window (or
+// edits a text's words).
 
-using System.Globalization;
 using Avalonia;
 using Avalonia.Controls;
 using Avalonia.Input;
 using Avalonia.Media;
+using Avalonia.Media.Imaging;
 using Filee.Core.Presets;
 
 namespace Filee.App.Controls;
 
-public sealed class EditorPreview : Panel
+public sealed class EditorPreview : Control
 {
     public static readonly StyledProperty<IEditorPreviewHost?> HostProperty =
         AvaloniaProperty.Register<EditorPreview, IEditorPreviewHost?>(nameof(Host));
@@ -20,30 +21,40 @@ public sealed class EditorPreview : Panel
     public static readonly StyledProperty<IBrush?> AccentBrushProperty =
         AvaloniaProperty.Register<EditorPreview, IBrush?>(nameof(AccentBrush), Brushes.MediumPurple);
 
-    /// <summary>Shown when the picture can be dragged ("Drag the picture to frame it").</summary>
-    public static readonly StyledProperty<string?> MoveHintProperty =
-        AvaloniaProperty.Register<EditorPreview, string?>(nameof(MoveHint));
-
     public IEditorPreviewHost? Host { get => GetValue(HostProperty); set => SetValue(HostProperty, value); }
     public IBrush? AccentBrush { get => GetValue(AccentBrushProperty); set => SetValue(AccentBrushProperty, value); }
-    public string? MoveHint { get => GetValue(MoveHintProperty); set => SetValue(MoveHintProperty, value); }
 
     /// <summary>Room left around the frame.</summary>
     private const double Room = 10;
 
-    private static readonly Typeface Bold = new(new FontFamily("Segoe UI, Inter, Arial, sans-serif"), FontStyle.Normal, FontWeight.Bold);
+    private const double HandleSize = 9;
+    private const double TurnHandleDistance = 26;
 
-    private readonly Overlay _overlay;
+    /// <summary>Turns this close to a quarter turn snap to it, in degrees.</summary>
+    private const double TurnSnap = 4;
+
+    private static readonly Cursor SizeAll = new(StandardCursorType.SizeAll);
+    private static readonly Cursor Hand = new(StandardCursorType.Hand);
+    private static readonly Cursor Cross = new(StandardCursorType.Cross);
+
+    private enum Drag { None, Move, Size, Turn }
+
     private IEditorPreviewHost? _hooked;
+    private Bitmap? _blurOf;
+    private Bitmap? _blurred;
+    private Drag _drag;
+    private EditorItem _dragItem;
+    private Point _pressedAt;
+    private EditorBox _boxAtPress;
+    private (double X, double Y, double Size, double Rotation) _valueAtPress;
 
-    // A tiny copy of the picture, drawn large and smooth: the blurred fill behind a picture of another shape.
-    private Avalonia.Media.Imaging.Bitmap? _blurOf;
-    private Avalonia.Media.Imaging.Bitmap? _blurred;
+    static EditorPreview()
+    {
+        AffectsRender<EditorPreview>(HostProperty, AccentBrushProperty);
+    }
 
     public EditorPreview()
     {
-        _overlay = new Overlay(this);
-        Children.Add(_overlay);
         ClipToBounds = true;
     }
 
@@ -64,6 +75,9 @@ public sealed class EditorPreview : Panel
     {
         base.OnDetachedFromVisualTree(e);
         Hook(null);
+        _blurred?.Dispose();
+        _blurred = null;
+        _blurOf = null;
     }
 
     private void Hook(IEditorPreviewHost? host)
@@ -71,59 +85,11 @@ public sealed class EditorPreview : Panel
         if (ReferenceEquals(_hooked, host))
             return;
         if (_hooked is not null)
-            _hooked.PreviewChanged -= OnHostChanged;
+            _hooked.PreviewChanged -= InvalidateVisual;
         _hooked = host;
         if (host is not null)
-            host.PreviewChanged += OnHostChanged;
-        OnHostChanged();
-    }
-
-    private void OnHostChanged() => _overlay.InvalidateVisual();
-
-    /// <summary>The blurred copy of <paramref name="picture"/> (made once per picture).</summary>
-    private Avalonia.Media.Imaging.Bitmap? Blurred(Avalonia.Media.Imaging.Bitmap picture)
-    {
-        if (ReferenceEquals(_blurOf, picture) && _blurred is not null)
-            return _blurred;
-        _blurred?.Dispose();
-        _blurred = null;
-        _blurOf = picture;
-        try
-        {
-            var size = picture.PixelSize;
-            _blurred = picture.CreateScaledBitmap(new PixelSize(Math.Max(2, size.Width / 24), Math.Max(2, size.Height / 24)),
-                Avalonia.Media.Imaging.BitmapInterpolationMode.MediumQuality);
-        }
-        catch (Exception ex) when (ex is not OutOfMemoryException)
-        {
-            // A picture that can't be scaled (disposed meanwhile): no blurred fill this time.
-            System.Diagnostics.Debug.WriteLine(ex);
-        }
-        return _blurred;
-    }
-
-    /// <summary>The frame, black, with the picture in it as it will be written (or the clip playing).</summary>
-    private void DrawPicture(DrawingContext context, Rect frame)
-    {
-        context.FillRectangle(Brushes.Black, frame);
-        if (Host is not { } host || host.Picture is not { } picture)
-            return;
-        using var clip = context.PushClip(frame);
-        if (Placement() is not { } place)
-        {
-            context.DrawImage(picture, frame);
-            return;
-        }
-        var (width, _) = host.Canvas;
-        var scale = width > 0 ? frame.Width / width : 1;
-        if (host.Fit == ClipFit.Blur && Blurred(picture) is { } soft)
-        {
-            var cover = ClipCanvas.Place(place.Width, place.Height, host.Canvas.Width, host.Canvas.Height, ClipFit.Crop);
-            using (context.PushRenderOptions(new RenderOptions { BitmapInterpolationMode = Avalonia.Media.Imaging.BitmapInterpolationMode.HighQuality }))
-                context.DrawImage(soft, new Rect(frame.X + cover.X * scale, frame.Y + cover.Y * scale, cover.Width * scale, cover.Height * scale));
-            context.FillRectangle(new SolidColorBrush(Color.FromArgb(40, 0, 0, 0)), frame);
-        }
-        context.DrawImage(picture, new Rect(frame.X + place.X * scale, frame.Y + place.Y * scale, place.Width * scale, place.Height * scale));
+            host.PreviewChanged += InvalidateVisual;
+        InvalidateVisual();
     }
 
     /// <summary>The frame on screen: the clip's shape, as large as fits.</summary>
@@ -141,209 +107,297 @@ public sealed class EditorPreview : Panel
         }
     }
 
-    protected override Size ArrangeOverride(Size finalSize)
+    /// <summary>The blurred copy of <paramref name="picture"/> (made once per picture).</summary>
+    private Bitmap? Blurred(Bitmap picture)
     {
-        _overlay.Arrange(new Rect(finalSize));
-        return finalSize;
-    }
-
-    /// <summary>Where the picture goes in the frame, in the frame's own pixels (null: it fills the frame).</summary>
-    private ClipPlacement? Placement()
-    {
-        if (Host is not { IsComposed: false, PicturePart: { Blank: false } part } host)
-            return null;
-        var (width, height) = host.Canvas;
-        var (pictureWidth, pictureHeight) = host.PictureSize;
-        return ClipCanvas.Place(pictureWidth, pictureHeight, width, height, host.Fit, part.PlayZoom, part.FocusX, part.FocusY);
-    }
-
-    /// <summary>The texts, the selection's outline and the hint, and the pointer.</summary>
-    private sealed class Overlay : Control
-    {
-        private readonly EditorPreview _owner;
-        private int _dragText = -1;
-        private bool _dragPicture;
-        private Point _pressedAt;
-        private (double X, double Y) _atPress;
-
-        public Overlay(EditorPreview owner)
+        if (ReferenceEquals(_blurOf, picture) && _blurred is not null)
+            return _blurred;
+        _blurred?.Dispose();
+        _blurred = null;
+        _blurOf = picture;
+        try
         {
-            _owner = owner;
-            Background = Brushes.Transparent;
+            var size = picture.PixelSize;
+            _blurred = picture.CreateScaledBitmap(new PixelSize(Math.Max(2, size.Width / 24), Math.Max(2, size.Height / 24)), BitmapInterpolationMode.MediumQuality);
         }
-
-        public IBrush? Background { get; }
-
-        private static readonly Cursor SizeAll = new(StandardCursorType.SizeAll);
-        private static readonly Cursor Hand = new(StandardCursorType.Hand);
-
-        public override void Render(DrawingContext context)
+        catch (Exception ex) when (ex is not OutOfMemoryException)
         {
-            context.FillRectangle(Brushes.Transparent, new Rect(Bounds.Size));
-            var host = _owner.Host;
-            var frame = _owner.Frame;
-            if (host is null || frame.Width <= 0)
-                return;
-            _owner.DrawPicture(context, frame);
-            var accent = _owner.AccentBrush ?? Brushes.MediumPurple;
-            using (context.PushClip(frame))
+            // A picture that can't be scaled (let go of meanwhile): no blurred fill this time.
+            System.Diagnostics.Debug.WriteLine(ex);
+        }
+        return _blurred;
+    }
+
+    // ───────────────────────── Drawing ─────────────────────────
+
+    public override void Render(DrawingContext context)
+    {
+        context.FillRectangle(Brushes.Transparent, new Rect(Bounds.Size));
+        var frame = Frame;
+        if (Host is not { } host || frame.Width <= 0)
+            return;
+        context.FillRectangle(Brushes.Black, frame);
+        if (host.Picture is { } picture)
+        {
+            try
             {
-                foreach (var (index, text) in host.VisibleTexts)
+                if (host.IsComposed || host.PicturePart is not { Blank: false } part)
+                    context.DrawImage(picture, frame);
+                else
                 {
-                    var drawn = Draw(context, text, frame);
-                    if (index == host.SelectedText && drawn is { } bounds)
-                        context.DrawRectangle(null, new Pen(accent, 1.5) { DashStyle = new DashStyle([4, 3], 0) }, bounds.Inflate(6), 4, 4);
+                    var (width, height) = host.PictureSize;
+                    EditorDrawing.DrawPicture(context, picture, host.Fit == ClipFit.Blur ? Blurred(picture) : null, part, width, height, host.Canvas, host.Fit, frame);
                 }
             }
-            if (host.CanMovePicture && !host.IsComposed && _owner.MoveHint is { Length: > 0 } hint)
+            catch (ObjectDisposedException)
             {
-                var label = new FormattedText("✥  " + hint, CultureInfo.CurrentCulture, FlowDirection.LeftToRight, Typeface.Default, 11.5, Brushes.White);
-                // In the preview's corner: an upright frame is narrower than the words.
-                var chip = new Rect(12, Bounds.Height - label.Height - 20, label.Width + 18, label.Height + 8);
-                context.DrawRectangle(new SolidColorBrush(Color.FromArgb(170, 0, 0, 0)), null, chip, 999, 999);
-                context.DrawText(label, new Point(chip.X + 9, chip.Y + 4));
+                // The picture was replaced meanwhile: the next frame draws the new one.
             }
         }
-
-        /// <summary>Draws <paramref name="text"/> in its style; returns where it is.</summary>
-        internal static Rect? Draw(DrawingContext? context, ClipText text, Rect frame)
+        using (context.PushClip(frame))
         {
-            if (string.IsNullOrWhiteSpace(text.Text))
+            foreach (var (_, image) in host.VisibleImages)
+            {
+                if (host.ImageOf(image.Path) is { } bitmap)
+                    EditorDrawing.DrawImage(context, image, bitmap, frame);
+            }
+            foreach (var (_, text) in host.VisibleTexts)
+                EditorDrawing.DrawText(context, text, frame);
+        }
+        if (host.Framed is { } framed && BoxOf(framed) is { } box)
+            DrawHandles(context, box);
+    }
+
+    private void DrawHandles(DrawingContext context, EditorBox box)
+    {
+        var accent = AccentBrush ?? Brushes.MediumPurple;
+        var corners = box.Corners();
+        var outline = new StreamGeometry();
+        using (var g = outline.Open())
+        {
+            g.BeginFigure(corners[0], false);
+            for (var i = 1; i < 4; i++)
+                g.LineTo(corners[i]);
+            g.EndFigure(true);
+        }
+        context.DrawGeometry(null, new Pen(new SolidColorBrush(Color.FromArgb(120, 0, 0, 0)), 3), outline);
+        context.DrawGeometry(null, new Pen(accent, 1.5), outline);
+        foreach (var corner in corners)
+            context.DrawRectangle(Brushes.White, new Pen(accent, 1.5), new Rect(corner.X - HandleSize / 2, corner.Y - HandleSize / 2, HandleSize, HandleSize), 2, 2);
+        var top = box.Turn(new Point(0, -box.Size.Height / 2));
+        var turn = TurnHandle(box);
+        context.DrawLine(new Pen(accent, 1.5), top, turn);
+        context.DrawEllipse(Brushes.White, new Pen(accent, 1.5), turn, HandleSize / 2 + 1, HandleSize / 2 + 1);
+    }
+
+    private static Point TurnHandle(EditorBox box) => box.Turn(new Point(0, -box.Size.Height / 2 - TurnHandleDistance));
+
+    /// <summary>Where <paramref name="item"/> is on screen.</summary>
+    private EditorBox? BoxOf(EditorItem item)
+    {
+        if (Host is not { } host)
+            return null;
+        var frame = Frame;
+        switch (item.Kind)
+        {
+            case EditorItemKind.Text:
+                return host.VisibleTexts.FirstOrDefault(t => t.Index == item.Index).Text is { } text ? EditorDrawing.TextBox(text, frame) : null;
+            case EditorItemKind.Image:
+                return host.VisibleImages.FirstOrDefault(i => i.Index == item.Index).Image is { } image
+                    ? EditorDrawing.ImageBox(image, host.ImageOf(image.Path), frame) : null;
+            case EditorItemKind.Part when !host.IsComposed && host.PicturePart is { Blank: false } part && item.Index == host.PictureIndex:
+                var (width, height) = host.PictureSize;
+                return EditorDrawing.PictureBox(part, width, height, host.Canvas, host.Fit, frame);
+            default:
                 return null;
-            var size = Math.Max(4, text.PlaySize * frame.Height);
-            var color = ClipCanvas.ParseColor(text.PlayColor) is { } c ? Color.FromRgb(c.R, c.G, c.B) : Colors.White;
-            var light = 0.299 * color.R + 0.587 * color.G + 0.114 * color.B > 160;
-            var letters = text.Style == ClipTextStyle.Label ? light ? Color.FromRgb(17, 17, 17) : Colors.White : color;
-            var formatted = new FormattedText(text.Text, CultureInfo.CurrentCulture, FlowDirection.LeftToRight, Bold, size, new SolidColorBrush(letters))
-            {
-                TextAlignment = TextAlignment.Center,
-                MaxTextWidth = Math.Max(10, frame.Width * 0.94),
-                LineHeight = size * 1.12,
-            };
-            var origin = new Point(frame.X + text.X * frame.Width - formatted.MaxTextWidth / 2, frame.Y + text.Y * frame.Height - formatted.Height / 2);
-            var geometry = formatted.BuildGeometry(origin);
-            if (geometry is null)
+        }
+    }
+
+    /// <summary>The value a drag starts from: the item's middle (parts of the frame), size and turn.</summary>
+    private (double X, double Y, double Size, double Rotation)? ValueOf(EditorItem item)
+    {
+        if (Host is not { } host)
+            return null;
+        switch (item.Kind)
+        {
+            case EditorItemKind.Text when host.VisibleTexts.FirstOrDefault(t => t.Index == item.Index).Text is { } text:
+                return (text.X, text.Y, text.PlaySize, text.Rotation);
+            case EditorItemKind.Image when host.VisibleImages.FirstOrDefault(i => i.Index == item.Index).Image is { } image:
+                return (image.X, image.Y, image.PlayWidth, image.Rotation);
+            case EditorItemKind.Part when host.PicturePart is { } part:
+                return (part.FocusX, part.FocusY, part.PlayZoom, part.PlayRotation);
+            default:
                 return null;
-            var bounds = geometry.Bounds;
-            if (context is null)
-                return bounds;
-            switch (text.Style)
-            {
-                case ClipTextStyle.Caption:
-                    context.DrawRectangle(new SolidColorBrush(Color.FromArgb(140, 0, 0, 0)), null, bounds.Inflate(size * 0.35), size * 0.18, size * 0.18);
-                    break;
-                case ClipTextStyle.Label:
-                    context.DrawRectangle(new SolidColorBrush(color), null, bounds.Inflate(size * 0.4), size * 0.2, size * 0.2);
-                    break;
-                default:
-                    // The outline and a soft shadow of a title.
-                    context.DrawGeometry(new SolidColorBrush(Color.FromArgb(90, 0, 0, 0)), null, formatted.BuildGeometry(origin + new Point(size / 30, size / 30))!);
-                    context.DrawGeometry(null, new Pen(new SolidColorBrush(Color.FromArgb(140, 0, 0, 0)), size * 0.14, lineJoin: PenLineJoin.Round), geometry);
-                    break;
-            }
-            context.DrawGeometry(new SolidColorBrush(letters), null, geometry);
-            return bounds;
         }
+    }
 
-        /// <summary>The visible text under <paramref name="point"/>, topmost first, or -1.</summary>
-        private int TextAt(Point point)
+    /// <summary>What is under <paramref name="point"/>: a text (topmost first), a picture over the video, else the part shown.</summary>
+    private EditorItem? ItemAt(Point point)
+    {
+        if (Host is not { } host)
+            return null;
+        var frame = Frame;
+        foreach (var (index, text) in host.VisibleTexts.Reverse())
         {
-            if (_owner.Host is not { } host)
-                return -1;
-            var frame = _owner.Frame;
-            foreach (var (index, text) in host.VisibleTexts.Reverse())
-            {
-                if (Draw(null, text, frame) is { } bounds && bounds.Inflate(8).Contains(point))
-                    return index;
-            }
-            return -1;
+            if (EditorDrawing.TextBox(text, frame) is { } box && box.Contains(point, 4))
+                return new EditorItem(EditorItemKind.Text, index);
         }
+        foreach (var (index, image) in host.VisibleImages.Reverse())
+        {
+            if (EditorDrawing.ImageBox(image, host.ImageOf(image.Path), frame).Contains(point, 4))
+                return new EditorItem(EditorItemKind.Image, index);
+        }
+        return frame.Contains(point) && host.PictureIndex >= 0 && host.PicturePart is { Blank: false } && !host.IsComposed
+            ? new EditorItem(EditorItemKind.Part, host.PictureIndex)
+            : null;
+    }
 
-        protected override void OnPointerPressed(PointerPressedEventArgs e)
-        {
-            base.OnPointerPressed(e);
-            if (_owner.Host is not { } host || !e.GetCurrentPoint(this).Properties.IsLeftButtonPressed)
-                return;
-            var point = e.GetPosition(this);
-            var frame = _owner.Frame;
-            _pressedAt = point;
-            var text = TextAt(point);
-            if (e.ClickCount == 2)
-            {
-                if (text >= 0)
-                    host.EditText(text);
-                else
-                    host.ToggleFullPreview();
-                e.Handled = true;
-                return;
-            }
-            if (text >= 0)
-            {
-                host.SelectText(text);
-                var found = host.VisibleTexts.First(t => t.Index == text).Text;
-                _dragText = text;
-                _atPress = (found.X, found.Y);
-                e.Pointer.Capture(this);
-                e.Handled = true;
-                return;
-            }
-            if (frame.Contains(point) && host.CanMovePicture && !host.IsComposed && host.PicturePart is { } part)
-            {
-                _dragPicture = true;
-                _atPress = (part.FocusX, part.FocusY);
-                e.Pointer.Capture(this);
-                e.Handled = true;
-            }
-        }
+    // ───────────────────────── Pointer ─────────────────────────
 
-        protected override void OnPointerMoved(PointerEventArgs e)
+    protected override void OnPointerPressed(PointerPressedEventArgs e)
+    {
+        base.OnPointerPressed(e);
+        if (Host is not { } host)
+            return;
+        var point = e.GetPosition(this);
+        var properties = e.GetCurrentPoint(this).Properties;
+        if (properties.IsRightButtonPressed)
         {
-            base.OnPointerMoved(e);
-            var point = e.GetPosition(this);
-            var host = _owner.Host;
-            var frame = _owner.Frame;
-            if (host is null || frame.Width <= 0)
-                return;
-            if (_dragText >= 0)
+            var item = ItemAt(point);
+            if (item is { } chosen)
+                host.Select(chosen);
+            OpenMenu(host.MenuFor(item, double.NaN));
+            e.Handled = true;
+            return;
+        }
+        if (!properties.IsLeftButtonPressed)
+            return;
+        if (e.ClickCount == 2)
+        {
+            if (ItemAt(point) is { Kind: EditorItemKind.Text } text)
+                host.EditText(text.Index);
+            else
+                host.ToggleFullPreview();
+            e.Handled = true;
+            return;
+        }
+        // The handles of what is framed first, then whatever is under the pointer.
+        if (host.Framed is { } framed && BoxOf(framed) is { } box && ValueOf(framed) is { } value)
+        {
+            var drag = Distance(point, TurnHandle(box)) <= HandleSize ? Drag.Turn
+                : box.Corners().Any(c => Distance(point, c) <= HandleSize) ? Drag.Size
+                : Drag.None;
+            if (drag != Drag.None)
             {
-                var x = Math.Clamp(_atPress.X + (point.X - _pressedAt.X) / frame.Width, 0, 1);
-                var y = Math.Clamp(_atPress.Y + (point.Y - _pressedAt.Y) / frame.Height, 0, 1);
-                // The middle lines snap: across and down.
-                if (Math.Abs(x - 0.5) * frame.Width < 6)
-                    x = 0.5;
-                host.MoveText(_dragText, x, y);
+                Begin(e, drag, framed, box, value, point);
                 return;
             }
-            if (_dragPicture && host.PicturePart is { } part)
+        }
+        if (ItemAt(point) is { } under)
+        {
+            host.Select(under);
+            if (BoxOf(under) is { } underBox && ValueOf(under) is { } underValue)
+                Begin(e, Drag.Move, under, underBox, underValue, point);
+            e.Handled = true;
+        }
+    }
+
+    private void Begin(PointerPressedEventArgs e, Drag drag, EditorItem item, EditorBox box, (double, double, double, double) value, Point point)
+    {
+        _drag = drag;
+        _dragItem = item;
+        _boxAtPress = box;
+        _valueAtPress = value;
+        _pressedAt = point;
+        e.Pointer.Capture(this);
+        e.Handled = true;
+    }
+
+    private static double Distance(Point a, Point b) => Math.Sqrt((a.X - b.X) * (a.X - b.X) + (a.Y - b.Y) * (a.Y - b.Y));
+
+    protected override void OnPointerMoved(PointerEventArgs e)
+    {
+        base.OnPointerMoved(e);
+        var point = e.GetPosition(this);
+        var host = Host;
+        var frame = Frame;
+        if (host is null || frame.Width <= 0)
+            return;
+        var (x, y, size, rotation) = _valueAtPress;
+        switch (_drag)
+        {
+            case Drag.Move:
+                {
+                    var nx = Math.Clamp(x + (point.X - _pressedAt.X) / frame.Width, 0, 1);
+                    var ny = Math.Clamp(y + (point.Y - _pressedAt.Y) / frame.Height, 0, 1);
+                    // The middle lines snap, across and down.
+                    if (Math.Abs(nx - 0.5) * frame.Width < 6)
+                        nx = 0.5;
+                    if (Math.Abs(ny - 0.5) * frame.Height < 6)
+                        ny = 0.5;
+                    host.Transform(_dragItem, nx, ny, size, rotation);
+                    return;
+                }
+            case Drag.Size:
+                {
+                    var from = Distance(_pressedAt, _boxAtPress.Middle);
+                    var to = Distance(point, _boxAtPress.Middle);
+                    if (from > 1)
+                        host.Transform(_dragItem, x, y, size * to / from, rotation);
+                    return;
+                }
+            case Drag.Turn:
+                {
+                    var middle = _boxAtPress.Middle;
+                    var degrees = Math.Atan2(point.Y - middle.Y, point.X - middle.X) * 180 / Math.PI + 90;
+                    var snapped = Math.Round(degrees / 90) * 90;
+                    if (Math.Abs(degrees - snapped) < TurnSnap)
+                        degrees = snapped;
+                    host.Transform(_dragItem, x, y, size, ClipCanvas.Angle(degrees));
+                    return;
+                }
+        }
+        // No drag: the cursor says what a press would do.
+        if (host.Framed is { } framed && BoxOf(framed) is { } box)
+        {
+            if (Distance(point, TurnHandle(box)) <= HandleSize)
             {
-                var (width, height) = host.Canvas;
-                var scale = width / frame.Width;
-                var (pictureWidth, pictureHeight) = host.PictureSize;
-                var place = ClipCanvas.Place(pictureWidth, pictureHeight, width, height, host.Fit, part.PlayZoom, _atPress.X, _atPress.Y);
-                var (fx, fy) = ClipCanvas.Drag(place, width, height, _atPress.X, _atPress.Y, (point.X - _pressedAt.X) * scale, (point.Y - _pressedAt.Y) * scale);
-                host.MovePicture(fx, fy);
+                Cursor = Cross;
                 return;
             }
-            Cursor = TextAt(point) >= 0 ? SizeAll : frame.Contains(point) && host.CanMovePicture && !host.IsComposed ? Hand : null;
+            if (box.Corners().Any(c => Distance(point, c) <= HandleSize))
+            {
+                Cursor = Hand;
+                return;
+            }
         }
+        Cursor = ItemAt(point) is not null ? SizeAll : null;
+    }
 
-        protected override void OnPointerReleased(PointerReleasedEventArgs e)
-        {
-            base.OnPointerReleased(e);
-            if (_dragText >= 0 || _dragPicture)
-                _owner.Host?.EndDrag();
-            _dragText = -1;
-            _dragPicture = false;
-            e.Pointer.Capture(null);
-        }
+    protected override void OnPointerReleased(PointerReleasedEventArgs e)
+    {
+        base.OnPointerReleased(e);
+        End(e.Pointer);
+    }
 
-        protected override void OnPointerCaptureLost(PointerCaptureLostEventArgs e)
-        {
-            base.OnPointerCaptureLost(e);
-            if (_dragText >= 0 || _dragPicture)
-                _owner.Host?.EndDrag();
-            _dragText = -1;
-            _dragPicture = false;
-        }
+    protected override void OnPointerCaptureLost(PointerCaptureLostEventArgs e)
+    {
+        base.OnPointerCaptureLost(e);
+        End(null);
+    }
+
+    private void End(IPointer? pointer)
+    {
+        if (_drag != Drag.None)
+            Host?.EndDrag();
+        _drag = Drag.None;
+        pointer?.Capture(null);
+    }
+
+    private void OpenMenu(IReadOnlyList<EditorMenuItem> items)
+    {
+        if (items.Count == 0)
+            return;
+        EditorMenus.Build(items).Open(this);
     }
 }

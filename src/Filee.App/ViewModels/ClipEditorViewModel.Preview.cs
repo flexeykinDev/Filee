@@ -9,6 +9,7 @@ using Avalonia.Media.Imaging;
 using Avalonia.Platform;
 using Avalonia.Threading;
 using CommunityToolkit.Mvvm.Input;
+using Filee.App.Controls;
 using Filee.Core.Presets;
 using Microsoft.Extensions.Logging;
 
@@ -51,31 +52,56 @@ public sealed partial class ClipEditorViewModel
         }
     }
 
-    public bool CanMovePicture
+    /// <summary>The part the picture is of, by its index in the clip, or -1.</summary>
+    public int PictureIndex { get; private set; } = -1;
+
+    /// <summary>The pictures over the video shown now, with their index in the clip.</summary>
+    public IReadOnlyList<(int Index, ClipImage Image)> VisibleImages { get; private set; } = [];
+
+    /// <summary>What has the frame with handles in the preview: the selected text or picture when it shows, or the part shown when it alone is selected.</summary>
+    public EditorItem? Framed =>
+        IsPlaying ? null
+        : HasTextSelection && VisibleTexts.Any(t => t.Index == SelectedText) ? new EditorItem(EditorItemKind.Text, SelectedText)
+        : HasImageSelection && VisibleImages.Any(i => i.Index == SelectedImage) ? new EditorItem(EditorItemKind.Image, SelectedImage)
+        : Selection == EditorSelection.Parts && _selectedParts.Count == 1 && _selectedParts[0] == PictureIndex && PicturePart is { Blank: false }
+            ? new EditorItem(EditorItemKind.Part, PictureIndex)
+            : null;
+
+    public void Transform(EditorItem item, double x, double y, double size, double rotation)
     {
-        get
+        StopPlaying();
+        var join = $"transform {item.Kind} {item.Index}";
+        switch (item.Kind)
         {
-            if (FirstPart is not { Blank: false } part || MediaOf(part.Source) is not { Width: > 0 } media)
-                return false;
-            var (width, height) = Canvas;
-            var place = ClipCanvas.Place(media.Width, media.Height, width, height, Fit, part.PlayZoom, part.FocusX, part.FocusY);
-            return place.Width > width + 1 || place.Height > height + 1;
+            case EditorItemKind.Text:
+                _project.ChangeText(item.Index, t =>
+                {
+                    t.X = x;
+                    t.Y = y;
+                    t.Size = Math.Clamp(size, ClipText.MinSize, ClipText.MaxSize);
+                    t.Rotation = rotation;
+                }, join);
+                break;
+            case EditorItemKind.Image:
+                _project.ChangeImage(item.Index, i =>
+                {
+                    i.X = x;
+                    i.Y = y;
+                    i.Width = size;
+                    i.Rotation = rotation;
+                }, join);
+                break;
+            case EditorItemKind.Part:
+                _project.ChangePart(item.Index, p =>
+                {
+                    p.FocusX = x;
+                    p.FocusY = y;
+                    p.Zoom = Math.Round(size, 3);
+                    p.Rotation = rotation;
+                }, join);
+                break;
         }
     }
-
-    public void MoveText(int index, double x, double y) =>
-        _project.ChangeText(index, t =>
-        {
-            t.X = x;
-            t.Y = y;
-        }, join: $"text place {index}");
-
-    public void MovePicture(double focusX, double focusY) =>
-        ChangeSelectedParts(p =>
-        {
-            p.FocusX = focusX;
-            p.FocusY = focusY;
-        }, "focus");
 
     public void EditText(int index)
     {
@@ -95,16 +121,18 @@ public sealed partial class ClipEditorViewModel
         if (_closed || IsPlaying)
             return;
         VisibleTexts = TextsAt(Playhead);
+        VisibleImages = ImagesAt(Playhead);
         var index = _project.IndexAt(Playhead);
+        PictureIndex = index;
         if (index < 0)
         {
-            ShowPicture(null, null, own: false);
+            ShowPicture(null, null);
             return;
         }
         var part = _project.Parts[index];
         if (part.Blank)
         {
-            ShowPicture(null, part, own: false);
+            ShowPicture(null, part);
             return;
         }
         var media = MediaOf(part.Source);
@@ -114,13 +142,13 @@ public sealed partial class ClipEditorViewModel
         if (_ownPictureOf is { } shown && string.Equals(shown.Path, path, StringComparison.OrdinalIgnoreCase) && Math.Abs(shown.Seconds - seconds) < 0.02
             && _ownPicture is not null)
         {
-            ShowPicture(_ownPicture, part, own: true);
+            ShowPicture(_ownPicture, part);
             return;
         }
         if (PictureAt(part.Source, seconds) is { } nearest)
-            ShowPicture(nearest, part, own: false);
+            ShowPicture(nearest, part);
         else
-            ShowPicture(Picture is not null && !IsComposed ? Picture : null, part, own: ReferenceEquals(Picture, _ownPicture));
+            ShowPicture(Picture is not null && !IsComposed ? Picture : null, part);
 
         _previewCts?.Cancel();
         _previewCts?.Dispose();
@@ -147,7 +175,7 @@ public sealed partial class ClipEditorViewModel
                     var old = _ownPicture;
                     _ownPicture = bitmap;
                     _ownPictureOf = (path, seconds);
-                    ShowPicture(bitmap, part, own: true);
+                    ShowPicture(bitmap, part);
                     if (old is not null && !ReferenceEquals(old, bitmap))
                         old.Dispose();
                 }
@@ -164,17 +192,19 @@ public sealed partial class ClipEditorViewModel
         }
     }
 
-    private void ShowPicture(Bitmap? picture, ClipPart? part, bool own)
+    private void ShowPicture(Bitmap? picture, ClipPart? part)
     {
         Picture = picture;
         IsComposed = false;
         PicturePart = part?.Clone();
-        if (!own && _ownPicture is not null && !ReferenceEquals(picture, _ownPicture))
-        {
-            // The taken frame stays while it may be shown again (the playhead back where it was).
-        }
         PreviewChanged?.Invoke();
     }
+
+    private IReadOnlyList<(int Index, ClipImage Image)> ImagesAt(double seconds) =>
+        _project.Images.Select((image, index) => (index, image))
+            .Where(i => seconds >= i.image.Start - 1e-6 && seconds < i.image.Start + i.image.Length)
+            .Select(i => (i.index, i.image.Clone()))
+            .ToList();
 
     private IReadOnlyList<(int Index, ClipText Text)> TextsAt(double seconds) =>
         _project.Texts.Select((text, index) => (index, text))
@@ -272,6 +302,7 @@ public sealed partial class ClipEditorViewModel
             Picture = bitmap;
             IsComposed = true;
             VisibleTexts = TextsAt(Playhead);
+            VisibleImages = ImagesAt(Playhead);
             PreviewChanged?.Invoke();
             TimelineChanged?.Invoke();
         });

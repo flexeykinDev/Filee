@@ -69,6 +69,25 @@ public sealed class ClipText
     /// </summary>
     public string? Color { get; set; }
 
+    /// <summary>The font family by name; null for Filee's own.</summary>
+    public string? Font { get; set; }
+
+    /// <summary>How see-through it is: 1 solid, down to 0.05.</summary>
+    public double Opacity { get; set; } = 1;
+
+    /// <summary>Turned clockwise, in degrees.</summary>
+    public double Rotation { get; set; }
+
+    /// <summary>
+    /// The text drawn by the editor as it looks, a transparent picture the size of the written frame (set for the
+    /// conversion; FFmpeg lays it over the video instead of drawing the text itself).
+    /// </summary>
+    public string? Rendered { get; set; }
+
+    /// <summary><see cref="Opacity"/> as written.</summary>
+    [JsonIgnore]
+    public double PlayOpacity => double.IsFinite(Opacity) ? Math.Clamp(Opacity, 0.05, 1) : 1;
+
     /// <summary><see cref="Size"/> as written.</summary>
     [JsonIgnore]
     public double PlaySize => Size > 0 && double.IsFinite(Size) ? Math.Clamp(Size, MinSize, MaxSize) : DefaultSize(Style);
@@ -103,6 +122,48 @@ public sealed class ClipText
             _ => 0.12,
         },
     };
+}
+
+/// <summary>A picture (a logo, a photo, a sticker) over the video for a while.</summary>
+public sealed class ClipImage
+{
+    /// <summary>The smallest and largest width, as a part of the frame's width.</summary>
+    public const double MinWidth = 0.03, MaxWidth = 2;
+
+    /// <summary>The picture's file.</summary>
+    public string Path { get; set; } = "";
+
+    /// <summary>When it appears, in seconds into the clip.</summary>
+    public double Start { get; set; }
+
+    /// <summary>How long it stays, in seconds.</summary>
+    public double Length { get; set; } = 5;
+
+    /// <summary>Where its middle is, as a part of the frame's width and height.</summary>
+    public double X { get; set; } = 0.5;
+
+    /// <summary>The same as <see cref="X"/>, down.</summary>
+    public double Y { get; set; } = 0.5;
+
+    /// <summary>How wide it is, as a part of the frame's width (its height follows its shape).</summary>
+    public double Width { get; set; } = 0.3;
+
+    /// <summary>Turned clockwise, in degrees.</summary>
+    public double Rotation { get; set; }
+
+    /// <summary>How see-through it is: 1 solid, down to 0.05.</summary>
+    public double Opacity { get; set; } = 1;
+
+    /// <summary>The picture drawn by the editor in place, the size of the written frame (set for the conversion).</summary>
+    public string? Rendered { get; set; }
+
+    [JsonIgnore]
+    public double PlayWidth => double.IsFinite(Width) && Width > 0 ? Math.Clamp(Width, MinWidth, MaxWidth) : 0.3;
+
+    [JsonIgnore]
+    public double PlayOpacity => double.IsFinite(Opacity) ? Math.Clamp(Opacity, 0.05, 1) : 1;
+
+    public ClipImage Clone() => (ClipImage)MemberwiseClone();
 }
 
 /// <summary>Where a picture sits in the frame: its size once scaled, and its top-left corner (outside the frame when it is larger).</summary>
@@ -149,8 +210,8 @@ public static class ClipCanvas
     /// <summary>
     /// Where a picture of <paramref name="width"/> × <paramref name="height"/> goes in a frame of
     /// <paramref name="frameWidth"/> × <paramref name="frameHeight"/>: fitted whole (bars, blur) or filling it (crop),
-    /// then <paramref name="zoom"/> times larger. Larger than the frame, the focus picks what is shown (0.5 the
-    /// middle); smaller, it is centred.
+    /// then <paramref name="zoom"/> times as large, its middle at <paramref name="focusX"/>, <paramref name="focusY"/>
+    /// of the frame (0.5 the middle). Its size and top-left corner before any turn.
     /// </summary>
     public static ClipPlacement Place(double width, double height, double frameWidth, double frameHeight, ClipFit fit, double zoom = 1,
         double focusX = 0.5, double focusY = 0.5)
@@ -159,26 +220,33 @@ public static class ClipCanvas
             return new ClipPlacement(frameWidth, frameHeight, 0, 0);
         var fitScale = Math.Min(frameWidth / width, frameHeight / height);
         var fillScale = Math.Max(frameWidth / width, frameHeight / height);
-        var scale = (fit == ClipFit.Crop ? fillScale : fitScale) * Math.Clamp(double.IsFinite(zoom) ? zoom : 1, 1, ClipPart.MaxZoom);
+        var scale = (fit == ClipFit.Crop ? fillScale : fitScale) * Math.Clamp(double.IsFinite(zoom) ? zoom : 1, ClipPart.MinZoom, ClipPart.MaxZoom);
         var (w, h) = (width * scale, height * scale);
-        return new ClipPlacement(w, h, Offset(w, frameWidth, focusX), Offset(h, frameHeight, focusY));
+        return new ClipPlacement(w, h, Middle(focusX) * frameWidth - w / 2, Middle(focusY) * frameHeight - h / 2);
     }
 
-    private static double Offset(double size, double frame, double focus) =>
-        size > frame ? -(size - frame) * Math.Clamp(double.IsFinite(focus) ? focus : 0.5, 0, 1) : (frame - size) / 2;
+    private static double Middle(double focus) => double.IsFinite(focus) ? Math.Clamp(focus, 0, 1) : 0.5;
 
     /// <summary>
-    /// The focus that puts the picture <paramref name="dx"/>, <paramref name="dy"/> pixels further (a drag on the
-    /// preview), for a picture placed by <paramref name="place"/> in a frame of the given size.
+    /// The middle that puts the picture <paramref name="dx"/>, <paramref name="dy"/> pixels further (a drag on the
+    /// preview) in a frame of the given size, kept inside the frame.
     /// </summary>
-    public static (double X, double Y) Drag(ClipPlacement place, double frameWidth, double frameHeight, double focusX, double focusY, double dx, double dy)
+    public static (double X, double Y) Drag(double frameWidth, double frameHeight, double focusX, double focusY, double dx, double dy) =>
+        (Math.Clamp(focusX + dx / Math.Max(1, frameWidth), 0, 1), Math.Clamp(focusY + dy / Math.Max(1, frameHeight), 0, 1));
+
+    /// <summary>An angle in degrees as −180 (exclusive) to 180, 0 for one that makes no sense.</summary>
+    public static double Angle(double degrees)
     {
-        var overX = place.Width - frameWidth;
-        var overY = place.Height - frameHeight;
-        var x = overX > 0.5 ? Math.Clamp(focusX - dx / overX, 0, 1) : focusX;
-        var y = overY > 0.5 ? Math.Clamp(focusY - dy / overY, 0, 1) : focusY;
-        return (x, y);
+        if (!double.IsFinite(degrees))
+            return 0;
+        var angle = Math.Round(degrees % 360, 2);
+        if (angle > 180)
+            angle -= 360;
+        if (angle <= -180)
+            angle += 360;
+        return angle;
     }
+
 
     /// <summary>The red, green and blue of "#RRGGBB", or null.</summary>
     public static (byte R, byte G, byte B)? ParseColor(string? color)

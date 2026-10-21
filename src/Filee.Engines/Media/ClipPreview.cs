@@ -97,7 +97,7 @@ public static partial class ClipPreview
         if (clip.Parts.Any(p => !p.Blank && sourceOf(p.Source).Info.Video is null))
             throw new InvalidOperationException("A part of the clip comes from a file without a picture.");
         var pictures = MediaEncoding.EditorPreviewVideo(clip, sourceOf, maxWidth, maxHeight, Fps, out var width, out var height);
-        var hasSound = clip.Music is not null || clip.Parts.Any(p => !p.Blank && sourceOf(p.Source).Info.Audio is not null);
+        var hasSound = clip.AllSounds.Any() || clip.Parts.Any(p => !p.Blank && sourceOf(p.Source).Info.Audio is not null);
         var sound = hasSound ? MediaEncoding.EditorPreviewAudio(clip, sourceOf) : null;
         await PlayGraphAsync(ffmpeg, pictures, sound, width, height, onFrame, cancellationToken).ConfigureAwait(false);
     }
@@ -116,6 +116,9 @@ public static partial class ClipPreview
             var stamp = new FileInfo(file);
             if (!Probed.TryGetValue(file, out var known) || known.Written != stamp.LastWriteTimeUtc || known.Size != stamp.Length)
             {
+                // A long session reads many files: what is kept stays small.
+                if (Probed.Count > 256)
+                    Probed.Clear();
                 known = (stamp.LastWriteTimeUtc, stamp.Length, await MediaInfo.ProbeAsync(ffprobe, file, cancellationToken).ConfigureAwait(false));
                 Probed[file] = known;
             }

@@ -321,7 +321,9 @@ public sealed partial class ClipEditorViewModel
         if (_closed)
             return;
         StopPlaying();
-        var edit = _project.ToEdit();
+        // Texts and pictures drawn as the preview draws them, at the written frame's size.
+        var (width, height, _) = ExportFrame();
+        var edit = Services.EditorLayers.Render(_project.ToEdit(), width, height, ImageOf);
         edit.Resolution = ExportResolution?.Value ?? 0;
         edit.Fps = ExportFps?.Value ?? 0;
         edit.MaxMegabytes = IsGif ? 0 : Limit();

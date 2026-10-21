@@ -1,6 +1,6 @@
-// The editor's properties panel: what the selection is set to (a part's sound, speed, transition and frame; a text's
-// words and look; the music's volume; the clip's frame, fades and sound), each change one undo step (a slider dragged
-// too).
+// The editor's properties panel: what the selection is set to (a part's sound, speed, transition, size, place and turn;
+// a text's words, look, font, see-through and turn; a picture's size, see-through and turn; a sound's volume and fade;
+// the clip's frame, fades and sound), each change one undo step (a slider dragged too).
 
 using System.Globalization;
 using Filee.Core.Presets;
@@ -13,10 +13,13 @@ public sealed partial class ClipEditorViewModel
     private static readonly string[] PropertyNames =
     [
         nameof(PartVolume), nameof(PartVolumeText), nameof(PartMuted), nameof(PartSpeed), nameof(PartSpeedEnd), nameof(PartReverse),
-        nameof(PartZoom), nameof(PartZoomText), nameof(IsStillSelected), nameof(PartHold), nameof(PartHoldText), nameof(IsMovingSelected),
+        nameof(PartZoom), nameof(PartZoomText), nameof(PartRotation), nameof(PartRotationText), nameof(IsStillSelected), nameof(PartHold), nameof(PartHoldText), nameof(IsMovingSelected),
         nameof(HasTransitionSection), nameof(TransitionKind), nameof(TransitionSeconds), nameof(TransitionSecondsText), nameof(HasTransitionLength),
         nameof(TextContent), nameof(TextStyleChoice), nameof(TextSize), nameof(TextColor), nameof(TextLength), nameof(TextLengthText),
-        nameof(MusicVolume), nameof(MusicVolumeText), nameof(MusicFade),
+        nameof(TextFont), nameof(TextOpacity), nameof(TextOpacityText), nameof(TextRotation), nameof(TextRotationText),
+        nameof(ImageWidth), nameof(ImageWidthText), nameof(ImageOpacity), nameof(ImageOpacityText), nameof(ImageRotation), nameof(ImageRotationText),
+        nameof(ImageLength), nameof(ImageLengthText),
+        nameof(SoundVolume), nameof(SoundVolumeText), nameof(SoundFade), nameof(SoundTrackText),
         nameof(AspectChoice), nameof(FitChoice), nameof(HasFadeIn), nameof(HasFadeOut),
         nameof(LevelLoudness), nameof(DuckMusic), nameof(ReduceNoise), nameof(LiftSpeech), nameof(HasOtherShapes),
         nameof(Is16x9), nameof(Is9x16), nameof(Is1x1), nameof(Is4x5), nameof(IsSourceShape),
@@ -25,7 +28,13 @@ public sealed partial class ClipEditorViewModel
     private ClipPart? FirstPart => Selection == EditorSelection.Parts && _selectedParts.Count > 0 && _selectedParts[0] < _project.Parts.Count
         ? _project.Parts[_selectedParts[0]] : null;
 
-    private ClipText? CurrentText => SelectedText >= 0 && SelectedText < _project.Texts.Count ? _project.Texts[SelectedText] : null;
+    private ClipText? CurrentText => HasTextSelection ? _project.Texts[SelectedText] : null;
+    private ClipImage? CurrentImage => HasImageSelection ? _project.Images[SelectedImage] : null;
+    private ClipMusic? CurrentSound => HasSoundSelection ? _project.Sounds[SelectedSound] : null;
+
+    private static string Percent(double value) => $"{Math.Round(value * 100).ToString(CultureInfo.CurrentCulture)} %";
+
+    private static string Degrees(double value) => $"{value.ToString("0.#", CultureInfo.CurrentCulture)}°";
 
     private void ChangeSelectedParts(Action<ClipPart> change, string? join = null)
     {
@@ -94,7 +103,16 @@ public sealed partial class ClipEditorViewModel
         set => ChangeSelectedParts(p => p.Zoom = Math.Round(value, 2), "zoom");
     }
 
-    public string PartZoomText => $"{Math.Round(PartZoom * 100).ToString(CultureInfo.CurrentCulture)} %";
+    public string PartZoomText => Percent(PartZoom);
+
+    /// <summary>The selected parts' turn, in degrees.</summary>
+    public double PartRotation
+    {
+        get => FirstPart?.PlayRotation ?? 0;
+        set => ChangeSelectedParts(p => p.Rotation = Math.Round(value), "turn");
+    }
+
+    public string PartRotationText => Degrees(PartRotation);
 
     public bool IsStillSelected => FirstPart is { IsStill: true };
 
@@ -113,13 +131,27 @@ public sealed partial class ClipEditorViewModel
 
     public string PartHoldText => _loc.Format("editor.seconds", PartHold.ToString("0.#", CultureInfo.CurrentCulture));
 
-    /// <summary>Puts the picture of the selected parts back as it was: not zoomed, in the middle.</summary>
+    /// <summary>Puts the picture of what is selected back as it was: its size, in the middle, not turned.</summary>
     [CommunityToolkit.Mvvm.Input.RelayCommand]
-    private void ResetFrame() => ChangeSelectedParts(p =>
+    private void ResetFrame()
     {
-        p.Zoom = 1;
-        p.FocusX = p.FocusY = 0.5;
-    });
+        if (HasTextSelection)
+            _project.ChangeText(SelectedText, t => t.Rotation = 0);
+        else if (HasImageSelection)
+            _project.ChangeImage(SelectedImage, i =>
+            {
+                i.X = i.Y = 0.5;
+                i.Rotation = 0;
+                i.Width = new ClipImage().Width;
+            });
+        else
+            ChangeSelectedParts(p =>
+            {
+                p.Zoom = 1;
+                p.Rotation = 0;
+                p.FocusX = p.FocusY = 0.5;
+            });
+    }
 
     // ───── A transition (selected, or of the one part selected) ─────
 
@@ -230,28 +262,128 @@ public sealed partial class ClipEditorViewModel
 
     public string TextLengthText => _loc.Format("editor.seconds", TextLength.ToString("0.#", CultureInfo.CurrentCulture));
 
-    // ───── The music ─────
+    /// <summary>The fonts on this computer, Filee's own first.</summary>
+    public IReadOnlyList<Choice<string>> Fonts { get; private set; } = [];
 
-    public double MusicVolume
+    public Choice<string>? TextFont
     {
-        get => _project.Music?.Volume ?? ClipMusic.DefaultVolume;
+        get => CurrentText is { } text ? Fonts.FirstOrDefault(f => f.Value == (text.Font ?? "")) ?? Fonts.FirstOrDefault() : null;
         set
         {
-            if (!_syncing)
-                _project.ChangeMusic(m => m.Volume = value, join: "music volume");
+            if (!_syncing && value is not null && HasTextSelection)
+                _project.ChangeText(SelectedText, t => t.Font = value.Value.Length == 0 ? null : value.Value);
         }
     }
 
-    public string MusicVolumeText => $"{Math.Round(MusicVolume * 100).ToString(CultureInfo.CurrentCulture)} %";
-
-    public bool MusicFade
+    public double TextOpacity
     {
-        get => _project.Music?.Fade ?? true;
+        get => CurrentText?.PlayOpacity ?? 1;
         set
         {
-            if (!_syncing)
-                _project.ChangeMusic(m => m.Fade = value);
+            if (!_syncing && HasTextSelection)
+                _project.ChangeText(SelectedText, t => t.Opacity = Math.Round(value, 2), join: $"text opacity {SelectedText}");
         }
+    }
+
+    public string TextOpacityText => Percent(TextOpacity);
+
+    public double TextRotation
+    {
+        get => CurrentText?.Rotation ?? 0;
+        set
+        {
+            if (!_syncing && HasTextSelection)
+                _project.ChangeText(SelectedText, t => t.Rotation = Math.Round(value), join: $"text turn {SelectedText}");
+        }
+    }
+
+    public string TextRotationText => Degrees(TextRotation);
+
+    // ───── A picture over the video ─────
+
+    public double ImageWidth
+    {
+        get => CurrentImage?.PlayWidth ?? 0.3;
+        set
+        {
+            if (!_syncing && HasImageSelection)
+                _project.ChangeImage(SelectedImage, i => i.Width = Math.Round(value, 3), join: $"image width {SelectedImage}");
+        }
+    }
+
+    public string ImageWidthText => Percent(ImageWidth);
+
+    public double ImageOpacity
+    {
+        get => CurrentImage?.PlayOpacity ?? 1;
+        set
+        {
+            if (!_syncing && HasImageSelection)
+                _project.ChangeImage(SelectedImage, i => i.Opacity = Math.Round(value, 2), join: $"image opacity {SelectedImage}");
+        }
+    }
+
+    public string ImageOpacityText => Percent(ImageOpacity);
+
+    public double ImageRotation
+    {
+        get => CurrentImage?.Rotation ?? 0;
+        set
+        {
+            if (!_syncing && HasImageSelection)
+                _project.ChangeImage(SelectedImage, i => i.Rotation = Math.Round(value), join: $"image turn {SelectedImage}");
+        }
+    }
+
+    public string ImageRotationText => Degrees(ImageRotation);
+
+    public double ImageLength
+    {
+        get => CurrentImage?.Length ?? PictureSeconds;
+        set
+        {
+            if (!_syncing && HasImageSelection)
+                _project.ChangeImage(SelectedImage, i => i.Length = Math.Round(value, 1), join: $"image length {SelectedImage}");
+        }
+    }
+
+    public string ImageLengthText => _loc.Format("editor.seconds", ImageLength.ToString("0.#", CultureInfo.CurrentCulture));
+
+    // ───── A sound ─────
+
+    public double SoundVolume
+    {
+        get => CurrentSound?.Volume ?? ClipMusic.DefaultVolume;
+        set
+        {
+            if (!_syncing && HasSoundSelection)
+                _project.ChangeSound(SelectedSound, s => s.Volume = value, join: $"sound volume {SelectedSound}");
+        }
+    }
+
+    public string SoundVolumeText => Percent(SoundVolume);
+
+    public bool SoundFade
+    {
+        get => CurrentSound?.Fade ?? true;
+        set
+        {
+            if (!_syncing && HasSoundSelection)
+                _project.ChangeSound(SelectedSound, s => s.Fade = value);
+        }
+    }
+
+    /// <summary>"A3": the track the selected sound is on.</summary>
+    public string SoundTrackText => CurrentSound is { } sound ? $"A{sound.Track + 2}" : "";
+
+    /// <summary>The selected sound one track up or down (a new track below the last).</summary>
+    [CommunityToolkit.Mvvm.Input.RelayCommand]
+    private void MoveSoundTrack(string? direction)
+    {
+        if (CurrentSound is not { } sound)
+            return;
+        var track = Math.Clamp(sound.Track + (direction == "-1" ? -1 : 1), 0, MaxSoundTracks - 1);
+        _project.ChangeSound(SelectedSound, s => s.Track = track);
     }
 
     // ───── The whole clip ─────
@@ -392,6 +524,11 @@ public sealed partial class ClipEditorViewModel
             new("", _loc["editor.shape_source"]),
             .. ClipCanvas.Aspects.OfType<string>().Select(a => new Choice<string>(a, a)),
         ];
+        Fonts =
+        [
+            new("", _loc["editor.font_default"]),
+            .. SystemFonts().Select(name => new Choice<string>(name, name)),
+        ];
         Fits =
         [
             new(ClipFit.Bars, _loc["editor.fit_bars"]),
@@ -404,5 +541,27 @@ public sealed partial class ClipEditorViewModel
         OnPropertyChanged(nameof(TextStyles));
         OnPropertyChanged(nameof(Aspects));
         OnPropertyChanged(nameof(Fits));
+        OnPropertyChanged(nameof(Fonts));
     }
+
+    /// <summary>The font families on this computer, by name (read once).</summary>
+    private static IReadOnlyList<string> SystemFonts()
+    {
+        if (_systemFonts is { } known)
+            return known;
+        try
+        {
+            _systemFonts = Avalonia.Media.FontManager.Current.SystemFonts.Select(f => f.Name).Where(n => !string.IsNullOrWhiteSpace(n))
+                .Distinct(StringComparer.OrdinalIgnoreCase).Order(StringComparer.CurrentCultureIgnoreCase).ToList();
+        }
+        catch (Exception ex) when (ex is not OutOfMemoryException)
+        {
+            // No font list here (a test, an unusual desktop): the default font only.
+            System.Diagnostics.Debug.WriteLine(ex);
+            _systemFonts = [];
+        }
+        return _systemFonts;
+    }
+
+    private static IReadOnlyList<string>? _systemFonts;
 }

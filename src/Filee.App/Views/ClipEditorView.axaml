@@ -314,7 +314,7 @@
                     </Border.RenderTransform>
                     <Grid RowDefinitions="86,Auto">
                       <Panel Background="#1A1A1E">
-                        <Image Source="{Binding Thumbnail}" Stretch="UniformToFill" IsVisible="{Binding IsVideo}" />
+                        <Image Source="{Binding Thumbnail}" Stretch="UniformToFill" IsVisible="{Binding HasPicture}" />
                         <PathIcon Width="28" Height="28" Data="{StaticResource Clip.Music}" Foreground="#D68A36" IsVisible="{Binding IsAudio}" />
                         <Border Background="#99000000" CornerRadius="5" Padding="6,1" Margin="6" HorizontalAlignment="Right" VerticalAlignment="Bottom">
                           <TextBlock Text="{Binding DurationText}" FontSize="11" Foreground="White" />
@@ -351,8 +351,7 @@
       <Grid x:Name="PreviewArea" Grid.Column="1" RowDefinitions="*,Auto">
         <Border x:Name="PreviewPanel" Classes="panel" Background="#0d0d10" ClipToBounds="True">
           <Panel>
-            <c:EditorPreview x:Name="Preview" Host="{Binding}" AccentBrush="{DynamicResource AccentBrush}"
-                             MoveHint="{DynamicResource editor.drag_picture}" />
+            <c:EditorPreview x:Name="Preview" Host="{Binding}" AccentBrush="{DynamicResource AccentBrush}" />
             <!-- Busy and messages -->
             <StackPanel HorizontalAlignment="Right" VerticalAlignment="Top" Margin="10" Spacing="6" IsHitTestVisible="False">
               <Border Classes="float" Padding="10,5,12,5" IsVisible="{Binding IsBusy}" HorizontalAlignment="Right">
@@ -491,18 +490,25 @@
                 </StackPanel>
               </Border>
 
-              <!-- A part: its frame -->
+              <!-- A part: its picture's size, place and turn -->
               <Border Classes="section" IsVisible="{Binding HasPartSelection}">
                 <StackPanel Spacing="8">
-                  <Grid ColumnDefinitions="*,Auto">
+                  <Grid ColumnDefinitions="*,Auto,Auto">
                     <TextBlock Classes="section-title" Text="{DynamicResource editor.frame}" />
-                    <Button Grid.Column="1" Classes="tool" Padding="8,3" FontSize="11.5" Content="{DynamicResource editor.reset_frame}"
+                    <Button Grid.Column="1" Classes="tool" Padding="8,3" FontSize="11.5" Content="{DynamicResource editor.menu_turn}"
+                            Command="{Binding TurnRightCommand}" />
+                    <Button Grid.Column="2" Classes="tool" Padding="8,3" FontSize="11.5" Content="{DynamicResource editor.reset_frame}"
                             Command="{Binding ResetFrameCommand}" />
                   </Grid>
                   <Grid ColumnDefinitions="Auto,*,Auto" ColumnSpacing="8">
                     <TextBlock Classes="label" Text="{DynamicResource editor.zoom}" />
-                    <Slider Grid.Column="1" Minimum="1" Maximum="3" SmallChange="0.05" Value="{Binding PartZoom}" VerticalAlignment="Center" />
+                    <Slider Grid.Column="1" Minimum="0.2" Maximum="3" SmallChange="0.05" Value="{Binding PartZoom}" VerticalAlignment="Center" />
                     <TextBlock Grid.Column="2" Classes="value" Text="{Binding PartZoomText}" />
+                  </Grid>
+                  <Grid ColumnDefinitions="Auto,*,Auto" ColumnSpacing="8">
+                    <TextBlock Classes="label" Text="{DynamicResource editor.rotation}" />
+                    <Slider Grid.Column="1" Minimum="-180" Maximum="180" SmallChange="1" Value="{Binding PartRotation}" VerticalAlignment="Center" />
+                    <TextBlock Grid.Column="2" Classes="value" Text="{Binding PartRotationText}" />
                   </Grid>
                   <TextBlock Classes="label" Text="{DynamicResource editor.drag_picture}" TextWrapping="Wrap" />
                 </StackPanel>
@@ -515,6 +521,13 @@
                   <TextBox x:Name="TextContentBox" Text="{Binding TextContent}" AcceptsReturn="True" TextWrapping="Wrap" MinHeight="56" MaxHeight="120"
                            FontSize="13" />
                   <ComboBox Classes="field" ItemsSource="{Binding TextStyles}" SelectedItem="{Binding TextStyleChoice}" />
+                  <ComboBox Classes="field" ItemsSource="{Binding Fonts}" SelectedItem="{Binding TextFont}" ToolTip.Tip="{DynamicResource editor.font}">
+                    <ComboBox.ItemTemplate>
+                      <DataTemplate x:DataType="vm:Choice`1">
+                        <TextBlock Text="{Binding Label}" FontFamily="{Binding Value, Converter={x:Static vm:FontNames.Family}}" />
+                      </DataTemplate>
+                    </ComboBox.ItemTemplate>
+                  </ComboBox>
                   <Grid ColumnDefinitions="Auto,*,Auto" ColumnSpacing="8">
                     <TextBlock Classes="label" Text="{DynamicResource editor.text_size}" />
                     <Slider Grid.Column="1" Minimum="0.02" Maximum="0.2" SmallChange="0.005" Value="{Binding TextSize}" VerticalAlignment="Center" />
@@ -539,22 +552,82 @@
                     <Slider Grid.Column="1" Minimum="0.5" Maximum="20" SmallChange="0.5" Value="{Binding TextLength}" VerticalAlignment="Center" />
                     <TextBlock Grid.Column="2" Classes="value" Text="{Binding TextLengthText}" />
                   </Grid>
+                  <Grid ColumnDefinitions="Auto,*,Auto" ColumnSpacing="8">
+                    <TextBlock Classes="label" Text="{DynamicResource editor.opacity}" />
+                    <Slider Grid.Column="1" Minimum="0.05" Maximum="1" SmallChange="0.05" Value="{Binding TextOpacity}" VerticalAlignment="Center" />
+                    <TextBlock Grid.Column="2" Classes="value" Text="{Binding TextOpacityText}" />
+                  </Grid>
+                  <Grid ColumnDefinitions="Auto,*,Auto" ColumnSpacing="8">
+                    <TextBlock Classes="label" Text="{DynamicResource editor.rotation}" />
+                    <Slider Grid.Column="1" Minimum="-180" Maximum="180" SmallChange="1" Value="{Binding TextRotation}" VerticalAlignment="Center" />
+                    <TextBlock Grid.Column="2" Classes="value" Text="{Binding TextRotationText}" />
+                  </Grid>
                 </StackPanel>
               </Border>
 
-              <!-- The music -->
-              <Border Classes="section" IsVisible="{Binding HasMusicSelection}">
+              <!-- A picture over the video -->
+              <Border Classes="section" IsVisible="{Binding HasImageSelection}">
                 <StackPanel Spacing="8">
-                  <TextBlock Classes="section-title" Text="{DynamicResource editor.music}" />
+                  <Grid ColumnDefinitions="*,Auto,Auto">
+                    <TextBlock Classes="section-title" Text="{DynamicResource editor.picture}" />
+                    <Button Grid.Column="1" Classes="tool" Padding="8,3" FontSize="11.5" Content="{DynamicResource editor.menu_turn}"
+                            Command="{Binding TurnRightCommand}" />
+                    <Button Grid.Column="2" Classes="tool" Padding="8,3" FontSize="11.5" Content="{DynamicResource editor.reset_frame}"
+                            Command="{Binding ResetFrameCommand}" />
+                  </Grid>
+                  <Grid ColumnDefinitions="Auto,*,Auto" ColumnSpacing="8">
+                    <TextBlock Classes="label" Text="{DynamicResource editor.text_size}" />
+                    <Slider Grid.Column="1" Minimum="0.03" Maximum="1.5" SmallChange="0.01" Value="{Binding ImageWidth}" VerticalAlignment="Center" />
+                    <TextBlock Grid.Column="2" Classes="value" Text="{Binding ImageWidthText}" />
+                  </Grid>
+                  <Grid ColumnDefinitions="Auto,*,Auto" ColumnSpacing="8">
+                    <TextBlock Classes="label" Text="{DynamicResource editor.opacity}" />
+                    <Slider Grid.Column="1" Minimum="0.05" Maximum="1" SmallChange="0.05" Value="{Binding ImageOpacity}" VerticalAlignment="Center" />
+                    <TextBlock Grid.Column="2" Classes="value" Text="{Binding ImageOpacityText}" />
+                  </Grid>
+                  <Grid ColumnDefinitions="Auto,*,Auto" ColumnSpacing="8">
+                    <TextBlock Classes="label" Text="{DynamicResource editor.rotation}" />
+                    <Slider Grid.Column="1" Minimum="-180" Maximum="180" SmallChange="1" Value="{Binding ImageRotation}" VerticalAlignment="Center" />
+                    <TextBlock Grid.Column="2" Classes="value" Text="{Binding ImageRotationText}" />
+                  </Grid>
+                  <Grid ColumnDefinitions="Auto,*,Auto" ColumnSpacing="8">
+                    <TextBlock Classes="label" Text="{DynamicResource editor.text_length}" />
+                    <Slider Grid.Column="1" Minimum="0.5" Maximum="60" SmallChange="0.5" Value="{Binding ImageLength}" VerticalAlignment="Center" />
+                    <TextBlock Grid.Column="2" Classes="value" Text="{Binding ImageLengthText}" />
+                  </Grid>
+                  <TextBlock Classes="label" Text="{DynamicResource editor.drag_picture}" TextWrapping="Wrap" />
+                </StackPanel>
+              </Border>
+
+              <!-- A sound -->
+              <Border Classes="section" IsVisible="{Binding HasSoundSelection}">
+                <StackPanel Spacing="8">
+                  <Grid ColumnDefinitions="*,Auto">
+                    <TextBlock Classes="section-title" Text="{DynamicResource editor.sound}" />
+                    <Border Grid.Column="1" Classes="segments" Padding="2">
+                      <StackPanel Orientation="Horizontal" Spacing="2">
+                        <Button Classes="tool round" Width="26" Height="26" Padding="5" Command="{Binding MoveSoundTrackCommand}" CommandParameter="-1"
+                                ToolTip.Tip="{DynamicResource editor.menu_track_up}">
+                          <PathIcon Width="10" Height="10" Data="{StaticResource Icon.ArrowUp}" />
+                        </Button>
+                        <TextBlock Text="{Binding SoundTrackText}" FontSize="12" FontWeight="SemiBold" VerticalAlignment="Center" Margin="4,0" />
+                        <Button Classes="tool round" Width="26" Height="26" Padding="5" Command="{Binding MoveSoundTrackCommand}" CommandParameter="1"
+                                ToolTip.Tip="{DynamicResource editor.menu_track_down}">
+                          <PathIcon Width="10" Height="10" Data="{StaticResource Icon.ArrowDown}" />
+                        </Button>
+                      </StackPanel>
+                    </Border>
+                  </Grid>
                   <Grid ColumnDefinitions="Auto,*,Auto" ColumnSpacing="8">
                     <PathIcon Width="14" Height="14" Data="{StaticResource Clip.Volume}" Foreground="{DynamicResource TextSecondaryBrush}" />
-                    <Slider Grid.Column="1" Minimum="0" Maximum="2" SmallChange="0.05" Value="{Binding MusicVolume}" VerticalAlignment="Center" />
-                    <TextBlock Grid.Column="2" Classes="value" Text="{Binding MusicVolumeText}" />
+                    <Slider Grid.Column="1" Minimum="0" Maximum="2" SmallChange="0.05" Value="{Binding SoundVolume}" VerticalAlignment="Center" />
+                    <TextBlock Grid.Column="2" Classes="value" Text="{Binding SoundVolumeText}" />
                   </Grid>
-                  <CheckBox Classes="switch" Content="{DynamicResource editor.music_fade}" IsChecked="{Binding MusicFade}" />
+                  <CheckBox Classes="switch" Content="{DynamicResource editor.music_fade}" IsChecked="{Binding SoundFade}" />
                   <CheckBox Classes="switch" Content="{DynamicResource editor.duck}" IsChecked="{Binding DuckMusic}" />
+                  <TextBlock Classes="label" Text="{DynamicResource editor.sound_hint}" TextWrapping="Wrap" />
                   <Button Classes="tool" Background="{DynamicResource SurfaceBrush}" HorizontalAlignment="Left" Command="{Binding DeleteSelectedCommand}"
-                          Content="{DynamicResource clip.remove_music}" FontSize="12.5" />
+                          Content="{DynamicResource editor.remove_sound}" FontSize="12.5" />
                 </StackPanel>
               </Border>
 
@@ -616,6 +689,12 @@
                 <StackPanel Orientation="Horizontal" Spacing="6">
                   <PathIcon Width="13" Height="13" Data="{StaticResource Editor.Freeze}" Foreground="{DynamicResource TextSecondaryBrush}" />
                   <TextBlock Classes="tool-label" Text="{DynamicResource editor.freeze}" FontSize="12.5" VerticalAlignment="Center" />
+                </StackPanel>
+              </Button>
+              <Button Classes="tool" Padding="10,6" Command="{Binding TurnRightCommand}" ToolTip.Tip="{DynamicResource editor.turn_hint}">
+                <StackPanel Orientation="Horizontal" Spacing="6">
+                  <PathIcon Width="13" Height="13" Data="{StaticResource Icon.Refresh}" Foreground="{DynamicResource TextSecondaryBrush}" />
+                  <TextBlock Classes="tool-label" Text="{DynamicResource editor.menu_turn}" FontSize="12.5" VerticalAlignment="Center" />
                 </StackPanel>
               </Button>
               <Button Classes="tool" Padding="10,6" Command="{Binding ToggleReverseCommand}" ToolTip.Tip="{DynamicResource editor.reverse_hint}">
