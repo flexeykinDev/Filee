@@ -514,7 +514,8 @@ public sealed class JobQueue : IAsyncDisposable
         Notify(job);
         // A file saved from a browser first has part of its progress already.
         var floor = file.Progress;
-        // The last step's outputs: what a failed or cancelled conversion started there is undone.
+        // The last step's outputs: what a failed or cancelled conversion started there is undone, and how many paths
+        // it handed out tells a single output from several.
         FinalAllocator? final = null;
 
         try
@@ -570,7 +571,8 @@ public sealed class JobQueue : IAsyncDisposable
 
             if (zipResult && inputs.Count > 0)
                 inputs = PackZip(job, file, index, inputs, ct);
-            else if (finalOutput && inputs.Count == 1)
+            // One output, and nothing else handed out for it (a Markdown file's picture folder goes with it).
+            else if (finalOutput && inputs.Count == 1 && final is { Handed: 1 })
                 inputs = [NextToSource(job, file, index, inputs[0])];
 
             // A name the engine took but wrote nothing to is free again.
@@ -719,7 +721,9 @@ public sealed class JobQueue : IAsyncDisposable
     private string NextToSource(ConversionJob job, FileResult file, int index, string output)
     {
         var rule = ForOneFile(job.Preset.Output);
-        if (ReferenceEquals(rule, job.Preset.Output) || !File.Exists(output))
+        if (ReferenceEquals(rule, job.Preset.Output) || !File.Exists(output)
+            // Pandoc writes a document's pictures into "<name>_files" beside it, outside the allocator: they stay together.
+            || Directory.Exists(Path.Combine(Path.GetDirectoryName(output)!, Path.GetFileNameWithoutExtension(output) + "_files")))
             return output;
         // The name was already made from the pattern and renames: it is kept as it is.
         rule.FileNamePattern = Path.GetFileNameWithoutExtension(output);
@@ -734,7 +738,8 @@ public sealed class JobQueue : IAsyncDisposable
                 return output;
             try
             {
-                File.Move(output, target, overwrite: true);
+                // Over an existing file only when the policy says so: one that appeared since is never replaced.
+                File.Move(output, target, overwrite: rule.Conflict == ConflictPolicy.Overwrite);
             }
             catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
             {
@@ -759,7 +764,7 @@ public sealed class JobQueue : IAsyncDisposable
         }
 
         static bool PathsEqual(string a, string b) =>
-            string.Equals(Path.GetFullPath(a), Path.GetFullPath(b), StringComparison.OrdinalIgnoreCase);
+            string.Equals(Path.GetFullPath(a), Path.GetFullPath(b), Platform.FileSystemPaths.Comparison);
     }
 
     private void Notify(ConversionJob job)
@@ -810,12 +815,23 @@ public sealed class JobQueue : IAsyncDisposable
     {
         try
         {
-            if (!Directory.Exists(workRoot))
+            var root = new DirectoryInfo(workRoot);
+            // A temp folder everyone can write in (/tmp on Linux) may hold a link to somewhere else: never follow one.
+            if (!root.Exists || root.LinkTarget is not null)
                 return;
-            foreach (var folder in Directory.EnumerateDirectories(workRoot))
+            foreach (var folder in root.EnumerateDirectories())
             {
-                if (IsJobId(Path.GetFileName(folder)) && DateTime.UtcNow - LastWrite(folder) > age)
-                    TryDelete(folder);
+                if (!IsJobId(folder.Name) || folder.LinkTarget is not null)
+                    continue;
+                try
+                {
+                    if (DateTime.UtcNow - LastWrite(folder) > age)
+                        TryDelete(folder.FullName);
+                }
+                catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+                {
+                    // Something in it can't be read: it stays, and the other folders are still looked at.
+                }
             }
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
@@ -824,11 +840,18 @@ public sealed class JobQueue : IAsyncDisposable
 
         static bool IsJobId(string name) => name.Length == 10 && name.All(char.IsAsciiHexDigitLower);
 
-        // A folder's own time changes only when an entry right inside it does: a long job writes deeper down.
-        static DateTime LastWrite(string folder)
+        // A folder's own time changes only when an entry right inside it does: a long job writes deeper down. Links
+        // inside are not followed, and a folder that can't be read throws (the job's folder then stays).
+        static DateTime LastWrite(DirectoryInfo folder)
         {
-            var last = Directory.GetLastWriteTimeUtc(folder);
-            foreach (var entry in new DirectoryInfo(folder).EnumerateFileSystemInfos("*", SearchOption.AllDirectories))
+            var last = folder.LastWriteTimeUtc;
+            var everything = new EnumerationOptions
+            {
+                RecurseSubdirectories = true,
+                AttributesToSkip = FileAttributes.ReparsePoint,
+                IgnoreInaccessible = false,
+            };
+            foreach (var entry in folder.EnumerateFileSystemInfos("*", everything))
             {
                 if (entry.LastWriteTimeUtc > last)
                     last = entry.LastWriteTimeUtc;
@@ -859,6 +882,8 @@ public sealed class JobQueue : IAsyncDisposable
     {
         /// <summary>Every path handed out, and whether nothing was there before (not a file it overwrites).</summary>
         private readonly List<(string Path, bool New)> _allocated = [];
+        /// <summary>How many paths were handed out: an output and the picture folder that goes with it are two.</summary>
+        public int Handed { get; private set; }
 
         public string? Allocate(string extension, string? suffix = null)
         {
@@ -872,6 +897,7 @@ public sealed class JobQueue : IAsyncDisposable
 
                 _allocated.Add((path, !File.Exists(path) && !Directory.Exists(path)));
                 queue._reservedOutputs.Add(path);
+                Handed++;
                 Directory.CreateDirectory(Path.GetDirectoryName(path)!);
                 // An empty extension asks for a folder (archive extraction): the converter creates it.
                 return path;

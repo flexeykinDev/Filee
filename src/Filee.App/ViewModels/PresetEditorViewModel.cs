@@ -409,7 +409,7 @@ public sealed partial class PresetEditorViewModel : ObservableObject
     [ObservableProperty] private Choice<WavSampleFormat> _wavFormat;
     [ObservableProperty] private bool _removeAudio;
 
-    /// <summary>Encode H.264 / HEVC on the graphics chip when one works (MediaOptions.HardwareEncoding).</summary>
+    /// <summary>Encode H.264 / HEVC / AV1 on the graphics chip when one works (MediaOptions.HardwareEncoding).</summary>
     [ObservableProperty] private bool _hardwareEncoding;
     [ObservableProperty] private Choice<ArchiveLevel> _archiveLevel;
     [ObservableProperty] private bool _combineIntoOne;
@@ -505,7 +505,7 @@ public sealed partial class PresetEditorViewModel : ObservableObject
     public bool ShowWav => TargetId is "wav" or "w64";
     /// <summary>MP4, MKV, MOV and WebM can be written with HEVC or AV1 besides their usual codec.</summary>
     public bool ShowVideoCodec => TargetIsVideo && VideoCodecs.Count > 1;
-    /// <summary>Hardware encoding applies to H.264 and HEVC only (not VP9, AV1, MPEG-2, …).</summary>
+    /// <summary>Hardware encoding applies to H.264, HEVC and AV1 only (not VP9, MPEG-2, …).</summary>
     public bool ShowHardwareEncoding => TargetIsVideo && MediaCodecs.TakesHardwareEncoding(TargetId, _videoCodecValue);
     /// <summary>M4A / M4B can hold Apple Lossless besides AAC.</summary>
     public bool ShowAudioCodec => AudioCodecs.Count > 1;

@@ -755,6 +755,50 @@ public class JobQueueTests
         Assert.False(Directory.Exists(Path.Combine(dir.Path, "a")));
     }
 
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public async Task Subfolder_only_for_several_files_keeps_a_markdown_file_with_its_picture_folder(bool reserved)
+    {
+        using var dir = new TempDir();
+        var converter = new FakeConverter("pandoc", new ConversionEdge("docx", "md")) { PictureFolder = true, ReservesPictureFolder = reserved };
+        await using var queue = new JobQueue(new ConverterCatalog([converter]));
+        var preset = new Preset
+        {
+            TargetFormat = "md",
+            Output = { Location = OutputLocation.Subfolder, SubfolderName = "{name}", SubfolderOnlyForSeveralFiles = true },
+        };
+
+        var job = await Run(queue, [dir.File("report.docx")], preset);
+
+        // Its links point into the folder beside it: the two stay together in the subfolder.
+        Assert.Equal([Path.Combine(dir.Path, "report", "report.md")], job.Outputs);
+        Assert.True(File.Exists(Path.Combine(dir.Path, "report", "report_files", "img0001.png")));
+    }
+
+    [Fact]
+    public async Task Subfolder_only_for_several_files_leaves_the_file_in_the_subfolder_when_skip_meets_an_existing_one()
+    {
+        using var dir = new TempDir();
+        var photo = dir.File("photo.jpg");
+        dir.File("photo.png", "older");
+        await using var queue = new JobQueue(new ConverterCatalog([new FakeConverter("magick", new ConversionEdge("jpg", "png"))]));
+        var preset = new Preset
+        {
+            TargetFormat = "png",
+            Output =
+            {
+                Location = OutputLocation.Subfolder, SubfolderName = "{name}", SubfolderOnlyForSeveralFiles = true,
+                Conflict = ConflictPolicy.Skip,
+            },
+        };
+
+        var job = await Run(queue, [photo], preset);
+
+        Assert.Equal([Path.Combine(dir.Path, "photo", "photo.png")], job.Outputs);
+        Assert.Equal("older", File.ReadAllText(Path.Combine(dir.Path, "photo.png")));
+    }
+
     [Fact]
     public async Task Without_subfolder_only_for_several_files_a_single_output_stays_in_the_subfolder()
     {
@@ -765,6 +809,30 @@ public class JobQueueTests
         var job = await Run(queue, [dir.File("photo.jpg")], preset);
 
         Assert.Equal([Path.Combine(dir.Path, "photo", "photo.png")], job.Outputs);
+    }
+
+    [Fact]
+    public void A_link_named_like_a_job_is_never_followed_by_the_work_folder_sweep()
+    {
+        using var root = new TempDir();
+        using var elsewhere = new TempDir();
+        var precious = Path.Combine(elsewhere.Path, "keep.txt");
+        File.WriteAllText(precious, "the user's");
+        File.SetLastWriteTimeUtc(precious, DateTime.UtcNow.AddDays(-30));
+        Directory.SetLastWriteTimeUtc(elsewhere.Path, DateTime.UtcNow.AddDays(-30));
+        var link = Path.Combine(root.Path, "0123456789");
+        try
+        {
+            Directory.CreateSymbolicLink(link, elsewhere.Path);
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            Assert.Skip("This machine doesn't let the test make a symbolic link.");
+        }
+
+        JobQueue.DeleteStaleWorkFolders(root.Path, TimeSpan.FromDays(1));
+
+        Assert.True(File.Exists(precious));
     }
 
     [Fact]

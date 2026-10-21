@@ -91,8 +91,17 @@ public partial class LocalizationTests
     [InlineData("pl-PL", "pl")]
     [InlineData("ar-EG", "ar")]
     [InlineData("de-DE", "en")]
+    [InlineData("", "en")] // Linux without LANG: the invariant culture
     public void Auto_follows_the_language_the_user_reads_the_os_in(string os, string expected) =>
         Assert.Equal(expected, LocalizationService.Resolve("auto", () => os));
+
+    [Theory]
+    [InlineData("ko")]
+    [InlineData("ar")]
+    [InlineData("en")]
+    public void A_chosen_language_is_kept_whatever_the_os_is_in(string chosen) =>
+        // The OS isn't even asked: the user picked the language in Settings.
+        Assert.Equal(chosen, LocalizationService.Resolve(chosen, () => throw new InvalidOperationException("asked the OS")));
 
     [Fact]
     public void Auto_is_not_the_language_filee_switched_to()

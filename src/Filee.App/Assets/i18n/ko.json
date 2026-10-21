@@ -608,7 +608,7 @@
   "presets.video_codec.hevc": "HEVC / H.265 (더 작게)",
   "presets.video_codec.av1": "AV1 (가장 작게, 느림)",
   "presets.hardware_encoding": "하드웨어 가속 사용 (그래픽 칩)",
-  "presets.hardware_encoding_hint": "H.264와 HEVC를 그래픽 칩으로 인코딩해요.\n훨씬 빠르고 전력도 덜 써요.\n같은 용량이면 화질이 조금 낮아요.\n쓸 수 있는 칩이 없으면 평소처럼 인코딩해요.",
+  "presets.hardware_encoding_hint": "H.264, HEVC, AV1을 그래픽 칩으로 인코딩해요.\n훨씬 빠르고 전력도 덜 써요.\n같은 용량이면 화질이 조금 낮아요.\n쓸 수 있는 칩이 없으면(AV1은 최신 칩이 필요해요) 평소처럼 인코딩해요.",
   "presets.audio_codec": "오디오 코덱",
   "presets.audio_codec.aac": "AAC",
   "presets.audio_codec.alac": "ALAC (무손실)",
