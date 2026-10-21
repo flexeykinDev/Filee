@@ -218,6 +218,12 @@ public sealed partial class ClipWindowViewModel : ObservableObject, IDisposable
     /// </summary>
     [ObservableProperty] private bool _isMagnet = true;
 
+    /// <summary>MOCKUP: the editor mode (CapCut-like layout) instead of the quick trim.</summary>
+    [ObservableProperty] private bool _isEditorMode;
+
+    /// <summary>MOCKUP: the Export window over the editor.</summary>
+    [ObservableProperty] private bool _isExportOpen;
+
     /// <summary>The timeline shows the clip and a little around it instead of the whole video (Z).</summary>
     [ObservableProperty] private bool _isZoomed;
 

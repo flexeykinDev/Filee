@@ -1968,6 +1968,40 @@ public class RenderTests
         });
     }
 
+    /// <summary>MOCKUP: the editor mode and the Export window, for review.</summary>
+    [AvaloniaTheory]
+    [InlineData("ru", true)]
+    [InlineData("ru", false)]
+    public void Clip_editor_mockup_renders(string language, bool dark)
+    {
+        ClipWindowTests.WithClipWindow(language, dark, ["Match highlights.mp4"], (window, vm, frames, _) =>
+        {
+            window.Width = 1480;
+            window.Height = 920;
+            vm.MoveHandle(ClipHandle.Start, 95.3);
+            vm.SetLength(42.6);
+            foreach (var at in new[] { 103.0, 110, 118, 128 })
+            {
+                vm.MovePlayhead(at);
+                vm.Split();
+            }
+            vm.MovePlayhead(113);
+            vm.Delete(closeUp: false);
+            vm.SelectPiece(1, Filee.App.Controls.ClipLane.Video);
+            var adding = vm.AddMusicAsync(Path.Combine("music", "Summer song.mp3"));
+            ClipWindowTests.WaitFor(() => vm.MusicLoudness.Count > 0);
+            vm.MoveMusic(2);
+            vm.MovePlayhead(107.4);
+            vm.IsEditorMode = true;
+            ClipWindowTests.WaitFor(() => vm.DetailStart == vm.Start && vm.DetailEnd == vm.End && frames.Times.Contains(vm.PreviewTime));
+            Pump();
+            Save(window, $"editor-mockup-{language}-{(dark ? "dark" : "light")}.png");
+            vm.IsExportOpen = true;
+            Pump();
+            Save(window, $"editor-export-mockup-{language}-{(dark ? "dark" : "light")}.png");
+        });
+    }
+
     internal static void Pump()
     {
         // Let layout, bindings and a few animation frames run.

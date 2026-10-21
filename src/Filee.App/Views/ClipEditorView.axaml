@@ -1,0 +1,472 @@
+<!-- MOCKUP of the clip window's editor mode (CapCut-like, in Filee's style): media on the left, the preview with the
+     player under it in the middle, the selection's properties on the right, the timeline with its tracks at the
+     bottom, Export at the top right. Static texts for now: they become translations when it is filled in. -->
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:vm="using:Filee.App.ViewModels"
+             xmlns:c="using:Filee.App.Controls"
+             x:Class="Filee.App.Views.ClipEditorView"
+             x:DataType="vm:ClipWindowViewModel">
+
+  <UserControl.Styles>
+    <Style Selector="Border.panel">
+      <Setter Property="Background" Value="{DynamicResource SurfaceBrush}" />
+      <Setter Property="BorderBrush" Value="{DynamicResource SubtleBorderBrush}" />
+      <Setter Property="BorderThickness" Value="1" />
+      <Setter Property="CornerRadius" Value="{DynamicResource SoftRadius}" />
+    </Style>
+    <Style Selector="TextBlock.panel-title">
+      <Setter Property="FontSize" Value="12" />
+      <Setter Property="FontWeight" Value="SemiBold" />
+      <Setter Property="Foreground" Value="{DynamicResource TextSecondaryBrush}" />
+      <Setter Property="Margin" Value="2,0,0,8" />
+    </Style>
+    <Style Selector="Border.section">
+      <Setter Property="Background" Value="{DynamicResource SurfaceAltBrush}" />
+      <Setter Property="CornerRadius" Value="{DynamicResource SoftRadiusSmall}" />
+      <Setter Property="Padding" Value="12,10" />
+    </Style>
+    <Style Selector="TextBlock.section-title">
+      <Setter Property="FontSize" Value="13" />
+      <Setter Property="FontWeight" Value="SemiBold" />
+      <Setter Property="Foreground" Value="{DynamicResource TextPrimaryBrush}" />
+      <Setter Property="Margin" Value="0,0,0,8" />
+    </Style>
+    <Style Selector="TextBlock.label">
+      <Setter Property="FontSize" Value="12" />
+      <Setter Property="Foreground" Value="{DynamicResource TextSecondaryBrush}" />
+      <Setter Property="VerticalAlignment" Value="Center" />
+    </Style>
+    <!-- Segmented choice: a row of small toggles in a soft pill -->
+    <Style Selector="Border.segments">
+      <Setter Property="Background" Value="{DynamicResource SurfaceBrush}" />
+      <Setter Property="CornerRadius" Value="999" />
+      <Setter Property="Padding" Value="3" />
+    </Style>
+    <Style Selector="ToggleButton.segment">
+      <Setter Property="Background" Value="Transparent" />
+      <Setter Property="BorderThickness" Value="0" />
+      <Setter Property="CornerRadius" Value="999" />
+      <Setter Property="Padding" Value="10,5" />
+      <Setter Property="FontSize" Value="12" />
+      <Setter Property="Foreground" Value="{DynamicResource TextPrimaryBrush}" />
+    </Style>
+    <Style Selector="ToggleButton.segment:checked /template/ ContentPresenter#PART_ContentPresenter">
+      <Setter Property="Background" Value="{DynamicResource AccentBrush}" />
+      <Setter Property="Foreground" Value="{DynamicResource OnAccentBrush}" />
+    </Style>
+    <Style Selector="Border.media">
+      <Setter Property="CornerRadius" Value="{DynamicResource SoftRadiusSmall}" />
+      <Setter Property="ClipToBounds" Value="True" />
+      <Setter Property="Background" Value="{DynamicResource SurfaceAltBrush}" />
+      <Setter Property="BorderBrush" Value="{DynamicResource SubtleBorderBrush}" />
+      <Setter Property="BorderThickness" Value="1" />
+    </Style>
+    <Style Selector="Border.media.on-timeline">
+      <Setter Property="BorderBrush" Value="{DynamicResource AccentBrush}" />
+      <Setter Property="BorderThickness" Value="2" />
+    </Style>
+    <Style Selector="CheckBox.switch">
+      <Setter Property="FontSize" Value="12.5" />
+    </Style>
+  </UserControl.Styles>
+
+  <Grid RowDefinitions="Auto,*,Auto" Margin="12">
+    <!-- Top: the file, the two modes, undo / redo and Export -->
+    <Grid ColumnDefinitions="*,Auto,*" Margin="2,0,2,10">
+      <Border Classes="float" Padding="5,5,12,5" HorizontalAlignment="Left">
+        <StackPanel Orientation="Horizontal" Spacing="9">
+          <Border Width="26" Height="26" CornerRadius="999" Background="{DynamicResource AccentSoftBrush}">
+            <PathIcon Width="13" Height="13" Data="{StaticResource Icon.Cut}" Foreground="{DynamicResource AccentBrush}" />
+          </Border>
+          <TextBlock Text="Нарезка: Match highlights" FontSize="13" FontWeight="SemiBold" VerticalAlignment="Center"
+                     Foreground="{DynamicResource TextPrimaryBrush}" />
+          <TextBlock Text="· 0:42.6" FontSize="13" VerticalAlignment="Center" Foreground="{DynamicResource TextSecondaryBrush}" />
+        </StackPanel>
+      </Border>
+
+      <Border Grid.Column="1" Classes="float segments" Padding="4">
+        <StackPanel Orientation="Horizontal" Spacing="2">
+          <ToggleButton Classes="segment" Content="Быстрая обрезка" Padding="14,6" />
+          <ToggleButton Classes="segment" Content="Редактор" IsChecked="True" Padding="14,6" />
+        </StackPanel>
+      </Border>
+
+      <StackPanel Grid.Column="2" Orientation="Horizontal" Spacing="6" HorizontalAlignment="Right">
+        <Border Classes="float" Padding="3">
+          <StackPanel Orientation="Horizontal" Spacing="2">
+            <Button Classes="tool round" ToolTip.Tip="Отменить (Ctrl+Z)">
+              <PathIcon Width="14" Height="14" Data="{StaticResource Clip.Undo}" Foreground="{DynamicResource TextSecondaryBrush}" />
+            </Button>
+            <Button Classes="tool round" ToolTip.Tip="Повторить (Ctrl+Y)">
+              <PathIcon Width="14" Height="14" Data="{StaticResource Clip.Redo}" Foreground="{DynamicResource TextSecondaryBrush}" />
+            </Button>
+          </StackPanel>
+        </Border>
+        <Button Classes="accent primary" Padding="18,9">
+          <StackPanel Orientation="Horizontal" Spacing="8">
+            <PathIcon Width="13" Height="13" Data="{StaticResource Icon.Upload}" Foreground="{DynamicResource OnAccentBrush}" />
+            <TextBlock Text="Экспорт" FontSize="13.5" VerticalAlignment="Center" />
+          </StackPanel>
+        </Button>
+        <Border Classes="float" Padding="3">
+          <StackPanel Orientation="Horizontal" Spacing="2">
+            <Button Classes="tool round">
+              <PathIcon Width="13" Height="13" Data="{StaticResource Clip.Maximize}" Foreground="{DynamicResource TextSecondaryBrush}" />
+            </Button>
+            <Button Classes="tool round">
+              <PathIcon Width="11" Height="11" Data="{StaticResource Icon.Close}" Foreground="{DynamicResource TextSecondaryBrush}" />
+            </Button>
+          </StackPanel>
+        </Border>
+      </StackPanel>
+    </Grid>
+
+    <!-- Middle: media | preview | properties -->
+    <Grid Grid.Row="1" ColumnDefinitions="250,*,300" ColumnSpacing="10">
+      <!-- Media: the videos and the music of the project -->
+      <Border Classes="panel" Padding="12">
+        <Grid RowDefinitions="Auto,Auto,*,Auto">
+          <TextBlock Classes="panel-title" Text="ФАЙЛЫ" />
+          <Border Grid.Row="1" Classes="segments" Background="{DynamicResource SurfaceAltBrush}" HorizontalAlignment="Left" Margin="0,0,0,10">
+            <StackPanel Orientation="Horizontal" Spacing="2">
+              <ToggleButton Classes="segment" Content="Видео" IsChecked="True" />
+              <ToggleButton Classes="segment" Content="Музыка" />
+              <ToggleButton Classes="segment" Content="Текст" />
+            </StackPanel>
+          </Border>
+          <ScrollViewer Grid.Row="2">
+            <StackPanel Spacing="10">
+              <Border Classes="media on-timeline">
+                <Grid RowDefinitions="96,Auto">
+                  <Image Source="{Binding Thumbnails[2]}" Stretch="UniformToFill" />
+                  <Border Background="#99000000" CornerRadius="5" Padding="6,1" Margin="6" HorizontalAlignment="Right" VerticalAlignment="Bottom">
+                    <TextBlock Text="5:12" FontSize="11" Foreground="White" />
+                  </Border>
+                  <StackPanel Grid.Row="1" Margin="8,6" Spacing="1">
+                    <TextBlock Text="match.mp4" FontSize="12.5" FontWeight="SemiBold" Foreground="{DynamicResource TextPrimaryBrush}" />
+                    <TextBlock Text="1920×1080 · 60 к/с · на шкале" FontSize="11" Foreground="{DynamicResource TextSecondaryBrush}" />
+                  </StackPanel>
+                </Grid>
+              </Border>
+              <Border Classes="media on-timeline">
+                <Grid RowDefinitions="96,Auto">
+                  <Image Source="{Binding Thumbnails[11]}" Stretch="UniformToFill" />
+                  <Border Background="#99000000" CornerRadius="5" Padding="6,1" Margin="6" HorizontalAlignment="Right" VerticalAlignment="Bottom">
+                    <TextBlock Text="3:40" FontSize="11" Foreground="White" />
+                  </Border>
+                  <StackPanel Grid.Row="1" Margin="8,6" Spacing="1">
+                    <TextBlock Text="round2.mp4" FontSize="12.5" FontWeight="SemiBold" Foreground="{DynamicResource TextPrimaryBrush}" />
+                    <TextBlock Text="1080×1920 · 30 к/с · вертикальное" FontSize="11" Foreground="{DynamicResource TextSecondaryBrush}" />
+                  </StackPanel>
+                </Grid>
+              </Border>
+              <Border Classes="media">
+                <Grid RowDefinitions="96,Auto">
+                  <Image Source="{Binding Thumbnails[7]}" Stretch="UniformToFill" Opacity="0.85" />
+                  <StackPanel Grid.Row="1" Margin="8,6" Spacing="1">
+                    <TextBlock Text="clutch.mkv" FontSize="12.5" FontWeight="SemiBold" Foreground="{DynamicResource TextPrimaryBrush}" />
+                    <TextBlock Text="перетащите на шкалу" FontSize="11" Foreground="{DynamicResource TextSecondaryBrush}" />
+                  </StackPanel>
+                </Grid>
+              </Border>
+            </StackPanel>
+          </ScrollViewer>
+          <Button Grid.Row="3" Classes="tool" HorizontalAlignment="Stretch" HorizontalContentAlignment="Center" Margin="0,10,0,0"
+                  Background="{DynamicResource AccentFaintBrush}">
+            <StackPanel Orientation="Horizontal" Spacing="7">
+              <PathIcon Width="12" Height="12" Data="{StaticResource Icon.Plus}" Foreground="{DynamicResource AccentBrush}" />
+              <TextBlock Text="Добавить видео или музыку" FontSize="12.5" />
+            </StackPanel>
+          </Button>
+        </Grid>
+      </Border>
+
+      <!-- Preview: the frame (with a 9:16 frame and a title shown) and the player -->
+      <Grid Grid.Column="1" RowDefinitions="*,Auto">
+        <Border Classes="panel" Background="#0d0d10" ClipToBounds="True">
+          <Panel>
+            <Image Source="{Binding Preview}" Stretch="Uniform" Margin="10" />
+            <!-- The 9:16 frame of a Shorts export: outside dimmed, dragged to place -->
+            <Grid ColumnDefinitions="*,Auto,*" Margin="10">
+              <Border Background="#99000000" />
+              <Border Grid.Column="1" Width="190" BorderBrush="{DynamicResource AccentBrush}" BorderThickness="2">
+                <Grid RowDefinitions="*,Auto">
+                  <Border Grid.Row="1" Margin="10,0,10,26" Padding="10,6" Background="#CC000000" CornerRadius="6" HorizontalAlignment="Center">
+                    <TextBlock Text="ЭЙС 1 vs 4" FontSize="17" FontWeight="Bold" Foreground="White" />
+                  </Border>
+                </Grid>
+              </Border>
+              <Border Grid.Column="2" Background="#99000000" />
+            </Grid>
+            <Border Classes="float" Padding="10,4" HorizontalAlignment="Left" VerticalAlignment="Top" Margin="18">
+              <TextBlock Text="9:16 · рамка двигается мышкой" FontSize="12" Foreground="{DynamicResource TextPrimaryBrush}" />
+            </Border>
+          </Panel>
+        </Border>
+        <!-- The player -->
+        <Grid Grid.Row="1" ColumnDefinitions="*,Auto,*" Margin="0,8,0,0">
+          <TextBlock Classes="label" FontSize="13" FontWeight="SemiBold" Foreground="{DynamicResource TextPrimaryBrush}"
+                     Text="0:12.4 / 0:42.6" />
+          <Border Grid.Column="1" Classes="float" Padding="4">
+            <StackPanel Orientation="Horizontal" Spacing="2">
+              <Button Classes="tool round" ToolTip.Tip="Кадр назад ( , )">
+                <TextBlock Text="⏮" FontSize="12" />
+              </Button>
+              <Button Classes="tool round" ToolTip.Tip="Назад (J)">
+                <TextBlock Text="⏪" FontSize="12" />
+              </Button>
+              <Button Classes="tool round" Width="40" Height="40" ToolTip.Tip="Играть (Пробел, L)" Background="{DynamicResource AccentSoftBrush}">
+                <PathIcon Width="16" Height="16" Data="{StaticResource Clip.Play}" Foreground="{DynamicResource AccentBrush}" />
+              </Button>
+              <Button Classes="tool round" ToolTip.Tip="Вперёд (L)">
+                <TextBlock Text="⏩" FontSize="12" />
+              </Button>
+              <Button Classes="tool round" ToolTip.Tip="Кадр вперёд ( . )">
+                <TextBlock Text="⏭" FontSize="12" />
+              </Button>
+            </StackPanel>
+          </Border>
+          <StackPanel Grid.Column="2" Orientation="Horizontal" Spacing="6" HorizontalAlignment="Right">
+            <Border Classes="segments" Background="{DynamicResource SurfaceAltBrush}">
+              <StackPanel Orientation="Horizontal" Spacing="2">
+                <ToggleButton Classes="segment" Content="16:9" />
+                <ToggleButton Classes="segment" Content="9:16" IsChecked="True" />
+                <ToggleButton Classes="segment" Content="1:1" />
+                <ToggleButton Classes="segment" Content="4:5" />
+              </StackPanel>
+            </Border>
+            <Button Classes="tool round" ToolTip.Tip="Во весь экран (F)">
+              <PathIcon Width="13" Height="13" Data="{StaticResource Clip.Maximize}" Foreground="{DynamicResource TextSecondaryBrush}" />
+            </Button>
+          </StackPanel>
+        </Grid>
+      </Grid>
+
+      <!-- Properties of the selection -->
+      <Border Grid.Column="2" Classes="panel" Padding="12">
+        <Grid RowDefinitions="Auto,*">
+          <StackPanel Spacing="2" Margin="0,0,0,10">
+            <TextBlock Classes="panel-title" Text="СВОЙСТВА" Margin="2,0,0,2" />
+            <TextBlock Text="Кусок 2 из 5 · match.mp4 · 0:07.5" FontSize="13" FontWeight="SemiBold" Margin="2,0,0,0"
+                       Foreground="{DynamicResource TextPrimaryBrush}" />
+          </StackPanel>
+          <ScrollViewer Grid.Row="1">
+            <StackPanel Spacing="10">
+              <Border Classes="section">
+                <StackPanel Spacing="8">
+                  <TextBlock Classes="section-title" Text="Звук" />
+                  <Grid ColumnDefinitions="Auto,*,Auto" ColumnSpacing="8">
+                    <PathIcon Width="14" Height="14" Data="{StaticResource Clip.Volume}" Foreground="{DynamicResource TextSecondaryBrush}" />
+                    <Slider Grid.Column="1" Minimum="0" Maximum="2" Value="1.2" VerticalAlignment="Center" />
+                    <TextBlock Grid.Column="2" Classes="label" Text="120 %" />
+                  </Grid>
+                  <CheckBox Classes="switch" Content="Выровнять громкость всего клипа" IsChecked="True" />
+                  <CheckBox Classes="switch" Content="Музыка тише под речью" IsChecked="True" />
+                  <CheckBox Classes="switch" Content="Убрать шум" />
+                  <CheckBox Classes="switch" Content="Вытянуть тихую речь" />
+                </StackPanel>
+              </Border>
+              <Border Classes="section">
+                <StackPanel Spacing="8">
+                  <TextBlock Classes="section-title" Text="Скорость" />
+                  <Border Classes="segments" HorizontalAlignment="Left">
+                    <StackPanel Orientation="Horizontal" Spacing="2">
+                      <ToggleButton Classes="segment" Content="0,5×" />
+                      <ToggleButton Classes="segment" Content="1×" IsChecked="True" />
+                      <ToggleButton Classes="segment" Content="1,5×" />
+                      <ToggleButton Classes="segment" Content="2×" />
+                      <ToggleButton Classes="segment" Content="…" />
+                    </StackPanel>
+                  </Border>
+                  <CheckBox Classes="switch" Content="Плавное замедление к середине" />
+                  <StackPanel Orientation="Horizontal" Spacing="6">
+                    <Button Classes="tool" Background="{DynamicResource SurfaceBrush}" Content="Стоп-кадр 2 с" FontSize="12" />
+                    <Button Classes="tool" Background="{DynamicResource SurfaceBrush}" Content="Реверс" FontSize="12" />
+                  </StackPanel>
+                </StackPanel>
+              </Border>
+              <Border Classes="section">
+                <StackPanel Spacing="8">
+                  <TextBlock Classes="section-title" Text="Переход в конце куска" />
+                  <WrapPanel>
+                    <ToggleButton Classes="segment" Content="Стык" Margin="0,0,4,4" />
+                    <ToggleButton Classes="segment" Content="Плавно" IsChecked="True" Margin="0,0,4,4" />
+                    <ToggleButton Classes="segment" Content="Через чёрное" Margin="0,0,4,4" />
+                    <ToggleButton Classes="segment" Content="Только звук" Margin="0,0,4,4" />
+                  </WrapPanel>
+                  <Grid ColumnDefinitions="Auto,*,Auto" ColumnSpacing="8">
+                    <TextBlock Classes="label" Text="Длина" />
+                    <Slider Grid.Column="1" Minimum="0.2" Maximum="2" Value="0.6" />
+                    <TextBlock Grid.Column="2" Classes="label" Text="0,6 с" />
+                  </Grid>
+                </StackPanel>
+              </Border>
+              <Border Classes="section">
+                <StackPanel Spacing="8">
+                  <TextBlock Classes="section-title" Text="Кадр" />
+                  <Grid ColumnDefinitions="Auto,*,Auto" ColumnSpacing="8">
+                    <TextBlock Classes="label" Text="Приближение" />
+                    <Slider Grid.Column="1" Minimum="1" Maximum="3" Value="1.4" />
+                    <TextBlock Grid.Column="2" Classes="label" Text="140 %" />
+                  </Grid>
+                  <TextBlock Classes="label" Text="Если видео другого размера:" />
+                  <WrapPanel>
+                    <ToggleButton Classes="segment" Content="Полосы" Margin="0,0,4,4" />
+                    <ToggleButton Classes="segment" Content="Обрезать" Margin="0,0,4,4" />
+                    <ToggleButton Classes="segment" Content="Размытый фон" IsChecked="True" Margin="0,0,4,4" />
+                  </WrapPanel>
+                </StackPanel>
+              </Border>
+            </StackPanel>
+          </ScrollViewer>
+        </Grid>
+      </Border>
+    </Grid>
+
+    <!-- Bottom: the tools and the timeline (T, V1, A1, A2) -->
+    <Border Grid.Row="2" Classes="panel" Padding="10,8,10,10" Margin="0,10,0,0">
+      <StackPanel Spacing="6">
+        <Grid ColumnDefinitions="Auto,*,Auto">
+          <StackPanel Orientation="Horizontal" Spacing="2">
+            <Button Classes="tool" Padding="10,6">
+              <StackPanel Orientation="Horizontal" Spacing="6">
+                <PathIcon Width="13" Height="13" Data="{StaticResource Icon.Cut}" Foreground="{DynamicResource TextSecondaryBrush}" />
+                <TextBlock Text="Разрезать" FontSize="12.5" VerticalAlignment="Center" />
+              </StackPanel>
+            </Button>
+            <Button Classes="tool" Padding="10,6">
+              <StackPanel Orientation="Horizontal" Spacing="6">
+                <PathIcon Width="13" Height="13" Data="{StaticResource Icon.Delete}" Foreground="{DynamicResource TextSecondaryBrush}" />
+                <TextBlock Text="Удалить" FontSize="12.5" VerticalAlignment="Center" />
+              </StackPanel>
+            </Button>
+            <Button Classes="tool" Padding="10,6">
+              <StackPanel Orientation="Horizontal" Spacing="6">
+                <TextBlock Text="T" FontWeight="Bold" FontSize="13" Foreground="{DynamicResource AccentBrush}" />
+                <TextBlock Text="Текст" FontSize="12.5" VerticalAlignment="Center" />
+              </StackPanel>
+            </Button>
+            <Button Classes="tool" Padding="10,6">
+              <StackPanel Orientation="Horizontal" Spacing="6">
+                <PathIcon Width="14" Height="14" Data="{StaticResource Clip.Silence}" Foreground="{DynamicResource TextSecondaryBrush}" />
+                <TextBlock Text="Убрать тишину" FontSize="12.5" VerticalAlignment="Center" />
+              </StackPanel>
+            </Button>
+            <Button Classes="tool" Padding="10,6">
+              <StackPanel Orientation="Horizontal" Spacing="6">
+                <TextBlock Text="★" FontSize="12" Foreground="{DynamicResource AccentBrush}" />
+                <TextBlock Text="Отметить хайлайт" FontSize="12.5" VerticalAlignment="Center" />
+              </StackPanel>
+            </Button>
+          </StackPanel>
+          <StackPanel Grid.Column="2" Orientation="Horizontal" Spacing="6" VerticalAlignment="Center">
+            <ToggleButton Classes="tool round" IsChecked="True" Width="32" Height="32" Padding="8" ToolTip.Tip="Магнит (M)">
+              <PathIcon Width="13" Height="13" Data="{StaticResource Clip.Magnet}" Foreground="{DynamicResource AccentBrush}" />
+            </ToggleButton>
+            <PathIcon Width="12" Height="12" Data="{StaticResource Icon.Search}" Foreground="{DynamicResource TextSecondaryBrush}" />
+            <Slider Width="120" Minimum="0" Maximum="1" Value="0.4" VerticalAlignment="Center" />
+          </StackPanel>
+        </Grid>
+
+        <!-- T: text on the clip -->
+        <Grid ColumnDefinitions="36,*" Height="24">
+          <TextBlock Text="T" FontSize="11" Opacity="0.6" VerticalAlignment="Center" Margin="4,0,0,0" Foreground="{DynamicResource TextPrimaryBrush}" />
+          <Canvas Grid.Column="1">
+            <Border Canvas.Left="300" Width="170" Height="22" CornerRadius="6" Background="{DynamicResource AccentBrush}">
+              <TextBlock Text="T  ЭЙС 1 vs 4" FontSize="11" FontWeight="SemiBold" Margin="8,0" VerticalAlignment="Center"
+                         Foreground="{DynamicResource OnAccentBrush}" />
+            </Border>
+            <Border Canvas.Left="760" Width="120" Height="22" CornerRadius="6" Background="{DynamicResource AccentSoftBrush}">
+              <TextBlock Text="T  GG" FontSize="11" FontWeight="SemiBold" Margin="8,0" VerticalAlignment="Center"
+                         Foreground="{DynamicResource TextPrimaryBrush}" />
+            </Border>
+          </Canvas>
+        </Grid>
+
+        <c:ClipSequence x:Name="Sequence" Margin="2,0"
+                        Pieces="{Binding Pieces}" Playhead="{Binding SequencePlayhead}"
+                        SelectedIndex="{Binding SelectedIndex}" SelectedIndices="{Binding SelectedIndices}"
+                        SelectedLane="{Binding SelectedLane}"
+                        Thumbnails="{Binding DetailThumbnails}" Loudness="{Binding DetailLoudness}"
+                        DetailStart="{Binding DetailStart}" DetailEnd="{Binding DetailEnd}"
+                        Music="{Binding Music}" MusicLoudness="{Binding MusicLoudness}"
+                        FadeIn="{Binding HasFadeIn}" FadeOut="{Binding HasFadeOut}" Snap="{Binding IsMagnet}"
+                        GapText="{DynamicResource clip.close_gap}" NoMusicText="{DynamicResource clip.no_music_yet}"
+                        AccentBrush="{DynamicResource AccentBrush}" OnAccentBrush="{DynamicResource OnAccentBrush}"
+                        TrackBrush="{DynamicResource SurfaceAltBrush}" StageBrush="{DynamicResource SurfaceBrush}"
+                        Foreground="{DynamicResource TextPrimaryBrush}" />
+      </StackPanel>
+    </Border>
+
+    <!-- MOCKUP: the Export window over the editor -->
+    <Border Grid.RowSpan="3" Background="#66000000" IsVisible="{Binding IsExportOpen}" Margin="-12">
+      <Border Classes="card" Width="520" HorizontalAlignment="Center" VerticalAlignment="Center" Padding="22,20">
+        <StackPanel Spacing="14">
+          <Grid ColumnDefinitions="*,Auto">
+            <TextBlock Text="Экспорт" FontSize="18" FontWeight="SemiBold" Foreground="{DynamicResource TextPrimaryBrush}" />
+            <Button Grid.Column="1" Classes="tool round">
+              <PathIcon Width="11" Height="11" Data="{StaticResource Icon.Close}" Foreground="{DynamicResource TextSecondaryBrush}" />
+            </Button>
+          </Grid>
+          <StackPanel Spacing="6">
+            <TextBlock Classes="label" Text="Для чего" />
+            <WrapPanel>
+              <ToggleButton Classes="segment" Content="Как исходник" Margin="0,0,6,6" />
+              <ToggleButton Classes="segment" Content="YouTube 1080p" Margin="0,0,6,6" />
+              <ToggleButton Classes="segment" Content="Shorts / TikTok 9:16" IsChecked="True" Margin="0,0,6,6" />
+              <ToggleButton Classes="segment" Content="Discord до 25 МБ" Margin="0,0,6,6" />
+              <ToggleButton Classes="segment" Content="Telegram" Margin="0,0,6,6" />
+            </WrapPanel>
+          </StackPanel>
+          <Grid ColumnDefinitions="*,12,*" RowDefinitions="Auto,8,Auto,8,Auto">
+            <StackPanel Spacing="4">
+              <TextBlock Classes="label" Text="Разрешение" />
+              <ComboBox HorizontalAlignment="Stretch" SelectedIndex="0">
+                <ComboBoxItem Content="1080×1920 (9:16)" />
+              </ComboBox>
+            </StackPanel>
+            <StackPanel Grid.Column="2" Spacing="4">
+              <TextBlock Classes="label" Text="Формат" />
+              <ComboBox HorizontalAlignment="Stretch" SelectedIndex="0">
+                <ComboBoxItem Content="MP4 · H.264" />
+              </ComboBox>
+            </StackPanel>
+            <StackPanel Grid.Row="2" Spacing="4">
+              <TextBlock Classes="label" Text="Кадров в секунду" />
+              <ComboBox HorizontalAlignment="Stretch" SelectedIndex="0">
+                <ComboBoxItem Content="Как в исходнике (60)" />
+              </ComboBox>
+            </StackPanel>
+            <StackPanel Grid.Row="2" Grid.Column="2" Spacing="4">
+              <TextBlock Classes="label" Text="Качество" />
+              <ComboBox HorizontalAlignment="Stretch" SelectedIndex="0">
+                <ComboBoxItem Content="Высокое" />
+              </ComboBox>
+            </StackPanel>
+            <StackPanel Grid.Row="4" Grid.ColumnSpan="3" Spacing="4">
+              <CheckBox Content="Не больше" IsChecked="False" />
+            </StackPanel>
+          </Grid>
+          <Border Classes="section">
+            <StackPanel Spacing="4">
+              <StackPanel Orientation="Horizontal" Spacing="8">
+                <Ellipse Width="8" Height="8" Fill="#3BB273" VerticalAlignment="Center" />
+                <TextBlock Text="Видеокарта: NVIDIA GeForce RTX 5070 (NVENC)" FontSize="12.5" FontWeight="SemiBold"
+                           Foreground="{DynamicResource TextPrimaryBrush}" />
+              </StackPanel>
+              <TextBlock Classes="label" Text="Примерно 40 с · файл около 38 МБ · сохранится рядом с видео как Match highlights_clip.mp4"
+                         TextWrapping="Wrap" />
+            </StackPanel>
+          </Border>
+          <StackPanel Orientation="Horizontal" Spacing="8" HorizontalAlignment="Right">
+            <Button Classes="tool" Content="Отмена" />
+            <Button Classes="accent primary" Padding="20,9">
+              <TextBlock Text="Экспортировать" FontSize="13.5" />
+            </Button>
+          </StackPanel>
+        </StackPanel>
+      </Border>
+    </Border>
+  </Grid>
+</UserControl>

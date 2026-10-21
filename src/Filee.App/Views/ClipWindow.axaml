@@ -7,6 +7,7 @@
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         xmlns:vm="using:Filee.App.ViewModels"
         xmlns:c="using:Filee.App.Controls"
+        xmlns:v="using:Filee.App.Views"
         x:Class="Filee.App.Views.ClipWindow"
         x:DataType="vm:ClipWindowViewModel"
         Title="{DynamicResource preset.clip}"
@@ -500,6 +501,11 @@
           <Button x:Name="CloseButton" Classes="accent primary" HorizontalAlignment="Center" MinWidth="120"
                   HorizontalContentAlignment="Center" Content="{DynamicResource common.close}" Command="{Binding CancelCommand}" />
         </StackPanel>
+      </Border>
+
+      <!-- MOCKUP: the editor mode over everything -->
+      <Border Background="{DynamicResource PageBrush}" IsVisible="{Binding IsEditorMode}">
+        <v:ClipEditorView />
       </Border>
 
       <!-- Reading the video -->
