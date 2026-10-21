@@ -51,8 +51,16 @@ public sealed partial class UpdateService : ObservableObject
     private ReleaseFile? _installer;
     private ReleaseFile? _checksums;
 
-    public UpdateService(ILogger<UpdateService> log) : this(log, new HttpClientHandler())
+    // Private build: no update checks, no release notes, no installer downloads. Every request fails as if offline.
+    public UpdateService(ILogger<UpdateService> log) : this(log, new NoNetwork())
     {
+    }
+
+    /// <summary>Answers every request as if the PC were offline, without opening a connection.</summary>
+    private sealed class NoNetwork : HttpMessageHandler
+    {
+        protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken) =>
+            throw new HttpRequestException("Network access is disabled in this build.");
     }
 
     /// <param name="handler">Network access; tests pass a handler that simulates being offline.</param>
@@ -222,7 +230,8 @@ public sealed partial class UpdateService : ObservableObject
     /// <summary>Checks shortly after start and then every few hours while <paramref name="enabled"/> says so.</summary>
     public void StartPeriodicChecks(Func<bool> enabled, TimeSpan firstDelay)
     {
-        if (_timer is not null)
+        // Private build: never checks by itself.
+        if (_timer is null)
             return;
         _timer = new DispatcherTimer { Interval = firstDelay };
         _timer.Tick += async (_, _) =>
