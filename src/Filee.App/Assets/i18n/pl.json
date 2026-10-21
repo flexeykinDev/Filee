@@ -619,6 +619,8 @@
   "theme.donut_opacity": "Krycie paska-pierścienia",
   "theme.reduce_motion": "Ogranicz animacje",
   "theme.reduce_motion_hint": "Zalecane na starszych komputerach. Wyłącza przejścia i odbijanie pierścienia.",
+  "theme.pixel": "Pixel style",
+  "theme.pixel_hint": "Dark, square and grainy: stepped corners, one lavender accent, digits in dots. While it's on, it picks the mode, accent and corners below.",
   "theme.preview": "Podgląd",
 
   "engines.title": "Silniki konwersji",

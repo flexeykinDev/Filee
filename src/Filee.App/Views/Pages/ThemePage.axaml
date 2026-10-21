@@ -9,6 +9,13 @@
 
     <StackPanel Grid.Row="1" Spacing="16">
       <Border Classes="card">
+        <StackPanel Spacing="6">
+          <CheckBox Content="{DynamicResource theme.pixel}" IsChecked="{Binding Pixel}" FontWeight="SemiBold" />
+          <TextBlock Classes="caption" TextWrapping="Wrap" Text="{DynamicResource theme.pixel_hint}" Margin="28,0,0,0" />
+        </StackPanel>
+      </Border>
+
+      <Border Classes="card">
         <StackPanel Spacing="8">
           <TextBlock Classes="label" Text="{DynamicResource theme.mode}" />
           <ComboBox ItemsSource="{Binding Modes}" SelectedItem="{Binding Mode}" MinWidth="220" />

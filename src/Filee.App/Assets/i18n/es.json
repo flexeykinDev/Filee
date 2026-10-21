@@ -603,6 +603,8 @@
   "theme.donut_opacity": "Opacidad del menú circular",
   "theme.reduce_motion": "Reducir las animaciones",
   "theme.reduce_motion_hint": "Recomendado para PC antiguos. Desactiva las transiciones y el rebote del menú circular.",
+  "theme.pixel": "Pixel style",
+  "theme.pixel_hint": "Dark, square and grainy: stepped corners, one lavender accent, digits in dots. While it's on, it picks the mode, accent and corners below.",
   "theme.preview": "Vista previa",
   "engines.title": "Motores de conversión",
   "engines.description": "Filee elige el mejor motor disponible para cada conversión.\nCuando varios pueden hacer el mismo trabajo, gana el que está más arriba.",

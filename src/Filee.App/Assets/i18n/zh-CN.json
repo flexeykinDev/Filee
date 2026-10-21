@@ -619,6 +619,8 @@
   "theme.donut_opacity": "环形工具栏不透明度",
   "theme.reduce_motion": "减少动画",
   "theme.reduce_motion_hint": "适合配置较低的电脑。关闭过渡效果和圆环的弹跳效果。",
+  "theme.pixel": "Pixel style",
+  "theme.pixel_hint": "Dark, square and grainy: stepped corners, one lavender accent, digits in dots. While it's on, it picks the mode, accent and corners below.",
   "theme.preview": "预览",
 
   "engines.title": "转换引擎",

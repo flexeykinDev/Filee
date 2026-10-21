@@ -603,6 +603,8 @@
   "theme.donut_opacity": "ドーナツメニューの不透明度",
   "theme.reduce_motion": "アニメーションを減らす",
   "theme.reduce_motion_hint": "古いPCにおすすめです。画面切り替え時のアニメーションと、ドーナツメニューの弾む動きを無効にします。",
+  "theme.pixel": "Pixel style",
+  "theme.pixel_hint": "Dark, square and grainy: stepped corners, one lavender accent, digits in dots. While it's on, it picks the mode, accent and corners below.",
   "theme.preview": "プレビュー",
   "engines.title": "変換エンジン",
   "engines.description": "Fileeは変換ごとに、利用可能な最適なエンジンを選びます。\n同じ変換ができるエンジンが複数ある場合は、一覧で上にあるものが優先されます。",

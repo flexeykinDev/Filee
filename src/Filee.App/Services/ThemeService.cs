@@ -40,7 +40,7 @@ public sealed class ThemeService(IPlatformServices platform)
         var app = Application.Current ?? throw new InvalidOperationException("No application.");
         var res = app.Resources;
 
-        app.RequestedThemeVariant = theme.Mode switch
+        app.RequestedThemeVariant = theme.Pixel ? ThemeVariant.Dark : theme.Mode switch
         {
             ThemeMode.Light => ThemeVariant.Light,
             ThemeMode.Dark => ThemeVariant.Dark,
@@ -48,8 +48,13 @@ public sealed class ThemeService(IPlatformServices platform)
         };
 
         // Accent colour + derived shades, corner radii and the font order (shared with the installer).
-        SoftPalette.ApplyAccent(res, Color.TryParse(theme.Accent, out var parsed) ? parsed : Color.Parse(SoftPalette.DefaultAccent));
-        SoftPalette.ApplyCornerRadius(res, theme.CornerRadius);
+        SoftPalette.ApplyAccent(res, theme.Pixel ? Color.Parse(PixelAccent)
+            : Color.TryParse(theme.Accent, out var parsed) ? parsed : Color.Parse(SoftPalette.DefaultAccent));
+        if (theme.Pixel)
+            res["OnAccentBrush"] = new SolidColorBrush(Color.Parse("#17132A"));
+        SoftPalette.ApplyCornerRadius(res, theme.Pixel ? 0 : theme.CornerRadius);
+        ApplyPixelStyle(app, theme.Pixel);
+        Filee.App.Controls.PixelState.Instance.IsOn = theme.Pixel;
         res["AppFontFamily"] = SoftPalette.FontFamilyFor(language);
         SoftPalette.ApplyFlowDirection(res, language);
 
@@ -58,6 +63,25 @@ public sealed class ThemeService(IPlatformServices platform)
         ApplyCustom(res, ThemeVariant.Dark, custom?.Dark);
 
         Motion.Configure(theme.ReduceMotion, () => platform.PrefersReducedMotion);
+    }
+
+    /// <summary>The one accent of the pixel style.</summary>
+    public const string PixelAccent = "#B9A8FF";
+
+    private static Avalonia.Markup.Xaml.Styling.StyleInclude? _pixel;
+
+    /// <summary>Adds Styles/Pixel.axaml after Filee's own styles, or takes it away again.</summary>
+    private static void ApplyPixelStyle(Application app, bool on)
+    {
+        _pixel ??= new Avalonia.Markup.Xaml.Styling.StyleInclude(new Uri("avares://Filee/"))
+        {
+            Source = new Uri("avares://Filee/Styles/Pixel.axaml"),
+        };
+        var added = app.Styles.Contains(_pixel);
+        if (on && !added)
+            app.Styles.Add(_pixel);
+        else if (!on && added)
+            app.Styles.Remove(_pixel);
     }
 
     /// <summary>The UI font chain for <paramref name="language"/> (see <see cref="SoftPalette.FontFamilies"/>).</summary>
