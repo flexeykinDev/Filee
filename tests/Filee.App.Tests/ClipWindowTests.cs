@@ -835,6 +835,15 @@ public class ClipWindowTests
             Pump();
             Assert.Equal(before, vm.IsMagnet);
             Assert.False(vm.IsFinished);
+
+            // The volume slider reached with Tab: the arrows move it, not the playhead.
+            var slider = window.FindControl<Slider>("VolumeSlider")!;
+            var playhead = vm.Playhead;
+            slider.Focus(NavigationMethod.Tab);
+            var volume = slider.Value;
+            Press(window, Key.Right);
+            Assert.True(slider.Value > volume);
+            Assert.Equal(playhead, vm.Playhead);
         });
     }
 
