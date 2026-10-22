@@ -216,6 +216,8 @@
   "clip.mute_hint": "Silenciar el sonido del fragmento elegido; la imagen sigue (Supr en A1 hace lo mismo)",
   "clip.music": "Música",
   "clip.music_hint": "Poner música de un archivo bajo el clip (A2): arrástrala, arrastra su línea para el volumen",
+  "clip.music_pick": "Música para el clip",
+  "clip.music_files": "Archivos de sonido y vídeo",
   "clip.no_music": "Este archivo no tiene sonido para usar como música",
   "clip.preparing": "Preparando…",
   "clip.finding_silence": "Buscando silencios…",

@@ -225,6 +225,8 @@
   "clip.mute_hint": "선택한 조각의 소리를 끄고 화면은 그대로 둬요 (A1에서 Delete도 같아요)",
   "clip.music": "음악",
   "clip.music_hint": "파일의 음악을 클립 아래에 깔기 (A2): 끌어서 옮기고, 선을 끌어 음량 조절",
+  "clip.music_pick": "클립에 넣을 음악",
+  "clip.music_files": "소리 및 동영상 파일",
   "clip.no_music": "이 파일에는 음악으로 쓸 소리가 없어요",
   "clip.preparing": "준비 중…",
   "clip.finding_silence": "무음 찾는 중…",

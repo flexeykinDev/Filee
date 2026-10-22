@@ -285,8 +285,9 @@ internal static partial class MediaEncoding
     /// <summary>
     /// A part of a video copied as it is (<c>-c copy</c>): done in a moment and nothing is lost, but a copy can only
     /// start at a key frame, so the clip starts at the last one before <see cref="ClipRange.Start"/> (up to a few
-    /// seconds early). The first video stream and every audio track are kept (none with
-    /// <see cref="MediaOptions.RemoveAudio"/>); the other options only apply to an exact clip, which is encoded.
+    /// seconds early). The first video stream and the first audio track are kept (none with
+    /// <see cref="MediaOptions.RemoveAudio"/>), as in an exact or edited clip and in Filee's other conversions; the
+    /// other options only apply to an exact clip, which is encoded.
     /// </summary>
     /// <exception cref="InvalidOperationException">The file has no video stream.</exception>
     /// <exception cref="NotSupportedException">FFmpeg cannot write <paramref name="target"/>.</exception>
@@ -299,7 +300,7 @@ internal static partial class MediaEncoding
 
         List<string> args = [.. Common, .. ClipInput(clip), "-i", input, "-map", "0:V:0"];
         if (audio)
-            args.AddRange(["-map", "0:a"]);
+            args.AddRange(["-map", "0:a:0"]);
         args.AddRange(["-c", "copy"]);
         // Apple plays HEVC in MP4/MOV only under the "hvc1" tag (FFmpeg keeps "hev1" from some sources).
         if (video.Codec == "hevc" && target is "mp4" or "m4v" or "mov")

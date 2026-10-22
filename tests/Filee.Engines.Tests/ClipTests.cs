@@ -41,7 +41,7 @@ public class ClipTests(EngineFixture fx) : IClassFixture<EngineFixture>
         Assert.DoesNotContain("-c:v", args);
         Assert.DoesNotContain("-vf", args);
         // The video and every audio track; the copied timestamps start at 0.
-        Assert.Equal(["0:V:0", "0:a"], args.Select((a, i) => (a, i)).Where(x => x.a == "-map").Select(x => args[x.i + 1]));
+        Assert.Equal(["0:V:0", "0:a:0"], args.Select((a, i) => (a, i)).Where(x => x.a == "-map").Select(x => args[x.i + 1]));
         Assert.Equal("make_zero", After(args, "-avoid_negative_ts"));
         Assert.Equal("mp4", After(args, "-f"));
         Assert.Equal("+faststart", After(args, "-movflags"));
@@ -52,7 +52,7 @@ public class ClipTests(EngineFixture fx) : IClassFixture<EngineFixture>
     public void A_fast_clip_without_sound_leaves_the_audio_out()
     {
         var args = MediaEncoding.ClipCopy("in.mkv", "out.mkv", "mkv", new ClipRange(0, 15), new MediaOptions { RemoveAudio = true }, Movie);
-        Assert.DoesNotContain("0:a", args);
+        Assert.DoesNotContain("0:a:0", args);
         Assert.Contains("-an", args);
         Assert.Equal("matroska", After(args, "-f"));
 

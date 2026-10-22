@@ -34,8 +34,8 @@ public sealed class ClipPart
     /// <summary>Slowest and fastest speed of a part.</summary>
     public const double MinSpeed = 0.25, MaxSpeed = 4;
 
-    /// <summary>Loudest volume of a part: four times as loud (+12 dB). 0 is silent.</summary>
-    public const double MaxVolume = 4;
+    /// <summary>Loudest volume of a part: twice as loud (+6 dB), as far as the volume slider and line go. 0 is silent.</summary>
+    public const double MaxVolume = 2;
 
     /// <summary>The longest still (<see cref="Hold"/>) and transition, in seconds.</summary>
     public const double MaxHold = 30, MaxTransition = 2;

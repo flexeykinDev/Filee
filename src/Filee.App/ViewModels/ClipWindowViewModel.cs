@@ -293,6 +293,11 @@ public sealed partial class ClipWindowViewModel : ObservableObject, IDisposable
     public bool HasMusic => Music is not null;
 
     /// <summary>What the window is busy with ("Preparing…" before the clip plays), or empty.</summary>
+    /// <summary>The music picker's title and the name of the files it lists.</summary>
+    public string MusicPickerTitle => _loc["clip.music_pick"];
+
+    public string MusicFilesName => _loc["clip.music_files"];
+
     public string BusyText => IsBuffering ? _loc["clip.preparing"]
         : IsFindingSilence ? _loc["clip.finding_silence"]
         : IsAddingMusic ? _loc["clip.loading_music"]
@@ -496,7 +501,8 @@ public sealed partial class ClipWindowViewModel : ObservableObject, IDisposable
         _log = log;
         _isFast = !tool.Media.ExactCut;
         _hasMultipleFiles = files.Count > 1;
-        _workFolder = Path.Combine(Path.GetTempPath(), "Filee", "clip-" + Guid.NewGuid().ToString("N")[..10]);
+        // Named like a job's work folder, so the sweep after a crash (JobQueue.DeleteStaleWorkFolders) takes it too.
+        _workFolder = Path.Combine(Filee.Core.Conversion.JobQueue.DefaultWorkRoot, Guid.NewGuid().ToString("N")[..10]);
         loc.LanguageChanged += OnLanguageChanged;
         _ = LoadFileAsync(0);
     }

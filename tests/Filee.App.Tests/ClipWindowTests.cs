@@ -793,7 +793,7 @@ public class ClipWindowTests
     {
         WithClipWindow("en", false, ["match.mp4"], (window, vm, frames, _) =>
         {
-            // Click maximize (and back), the magnet and a fade: none of them keeps the keyboard.
+            // Click maximize (and back), the magnet and the zoom: Space still plays, it presses none of them.
             foreach (var name in new[] { "MaximizeButton", "MaximizeButton", "MagnetToggle", "ZoomToggle" })
             {
                 var button = window.FindControl<Control>(name)!;
@@ -801,7 +801,6 @@ public class ClipWindowTests
                 window.MouseDown(centre, MouseButton.Left);
                 window.MouseUp(centre, MouseButton.Left);
                 Pump();
-                Assert.False(button.IsFocused);
             }
             var state = window.WindowState;
             var magnet = vm.IsMagnet;
@@ -811,6 +810,31 @@ public class ClipWindowTests
             window.KeyRelease(Key.Space, RawInputModifiers.None, PhysicalKey.None, null);
             WaitFor(() => frames.Played.Count == 1);
             Assert.Equal((state, magnet, zoom), (window.WindowState, vm.IsMagnet, vm.IsZoomed));
+        });
+    }
+
+    [AvaloniaFact]
+    public void A_button_reached_with_Tab_is_pressed_by_Space_and_Enter()
+    {
+        WithClipWindow("en", false, ["match.mp4"], (window, vm, frames, _) =>
+        {
+            var magnet = window.FindControl<Avalonia.Controls.Primitives.ToggleButton>("MagnetToggle")!;
+            Assert.True(magnet.Focusable);
+            var before = vm.IsMagnet;
+            magnet.Focus(NavigationMethod.Tab);
+            Pump();
+
+            Press(window, Key.Space);
+            window.KeyRelease(Key.Space, RawInputModifiers.None, PhysicalKey.None, null);
+            Pump();
+            Assert.NotEqual(before, vm.IsMagnet);
+            Assert.Empty(frames.Played);
+
+            Press(window, Key.Enter);
+            window.KeyRelease(Key.Enter, RawInputModifiers.None, PhysicalKey.None, null);
+            Pump();
+            Assert.Equal(before, vm.IsMagnet);
+            Assert.False(vm.IsFinished);
         });
     }
 

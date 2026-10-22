@@ -225,6 +225,8 @@
   "clip.mute_hint": "Wycisz dźwięk wybranego fragmentu; obraz gra dalej (Delete na A1 robi to samo)",
   "clip.music": "Muzyka",
   "clip.music_hint": "Podłóż muzykę z pliku pod klip (A2): przeciągaj ją, przeciągnij linię, by zmienić głośność",
+  "clip.music_pick": "Muzyka do klipu",
+  "clip.music_files": "Pliki dźwięku i wideo",
   "clip.no_music": "Ten plik nie ma dźwięku do użycia jako muzyka",
   "clip.preparing": "Przygotowanie…",
   "clip.finding_silence": "Szukam ciszy…",

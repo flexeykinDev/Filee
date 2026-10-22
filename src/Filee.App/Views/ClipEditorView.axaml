@@ -96,10 +96,6 @@
     </Style>
     <Style Selector="CheckBox.switch">
       <Setter Property="FontSize" Value="12.5" />
-      <Setter Property="Focusable" Value="False" />
-    </Style>
-    <Style Selector="Slider">
-      <Setter Property="Focusable" Value="False" />
     </Style>
 
     <!-- A card in Files -->

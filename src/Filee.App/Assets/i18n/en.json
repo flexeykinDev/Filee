@@ -225,6 +225,8 @@
   "clip.mute_hint": "Mute the selected piece's sound; its picture plays on (Delete on A1 does it too)",
   "clip.music": "Music",
   "clip.music_hint": "Put music from a file under the clip (A2): drag it along, drag its line for the volume",
+  "clip.music_pick": "Music for the clip",
+  "clip.music_files": "Sound and video files",
   "clip.no_music": "This file has no sound to use as music",
   "clip.preparing": "Preparing…",
   "clip.finding_silence": "Finding silence…",

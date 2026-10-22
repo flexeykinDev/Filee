@@ -225,6 +225,8 @@
   "clip.mute_hint": "Couper le son du morceau choisi ; l'image continue (Suppr sur A1 fait de même)",
   "clip.music": "Musique",
   "clip.music_hint": "Mettre la musique d'un fichier sous l'extrait (A2) : faites-la glisser, tirez sa ligne pour le volume",
+  "clip.music_pick": "Musique pour l'extrait",
+  "clip.music_files": "Fichiers son et vidéo",
   "clip.no_music": "Ce fichier n'a pas de son à utiliser comme musique",
   "clip.preparing": "Préparation…",
   "clip.finding_silence": "Recherche des silences…",
