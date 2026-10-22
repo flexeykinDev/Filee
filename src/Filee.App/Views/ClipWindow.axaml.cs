@@ -35,6 +35,17 @@ public partial class ClipWindow : Window
                 e.Handled = true;
         }, RoutingStrategies.Tunnel);
         ResizeGrip.PointerPressed += OnGripPressed;
+        // Videos dropped on the quick cut: the editor opens with them after the clip.
+        DragDrop.SetAllowDrop(Shell, true);
+        DragDrop.AddDragOverHandler(Shell, (_, e) =>
+            e.DragEffects = DraggedFiles.Offered(e.DataTransfer) && _vm is { IsQuickMode: true } ? DragDropEffects.Copy : DragDropEffects.None);
+        DragDrop.AddDropHandler(Shell, async (_, e) =>
+        {
+            if (e.Handled || _vm is not { IsQuickMode: true, CanEdit: true } vm || DraggedFiles.Local(e.DataTransfer) is not { Count: > 0 } files)
+                return;
+            e.Handled = true;
+            await vm.OpenEditorWithAsync(files);
+        });
     }
 
     internal ClipTimeline ClipTimeline => Timeline;
@@ -118,6 +129,13 @@ public partial class ClipWindow : Window
     {
         if (_vm is not { } vm)
             return;
+        // The editor has keys of its own.
+        if (vm.IsEditorMode)
+        {
+            if (EditorView.HandleKey(e))
+                e.Handled = true;
+            return;
+        }
         var plain = e.KeyModifiers == KeyModifiers.None;
         var command = e.KeyModifiers == KeyModifiers.Control || e.KeyModifiers == KeyModifiers.Meta;
         var commandShift = e.KeyModifiers == (KeyModifiers.Control | KeyModifiers.Shift) || e.KeyModifiers == (KeyModifiers.Meta | KeyModifiers.Shift);
